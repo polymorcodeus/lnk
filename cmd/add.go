@@ -1,15 +1,12 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
 
-	"github.com/yarlson/lnk/internal/fs"
 	"github.com/yarlson/lnk/internal/lnk"
-	error2 "github.com/yarlson/lnk/internal/lnkerror"
 )
 
 func newAddCmd() *cobra.Command {
@@ -45,7 +42,7 @@ changes to your system - perfect for verification before bulk operations.`,
 
 			// Handle dry-run mode
 			if dryRun {
-				files, err := lnk.PreviewAdd(args, recursive)
+				files, err := l.PreviewAdd(args, recursive)
 				if err != nil {
 					return err
 				}
@@ -57,11 +54,11 @@ changes to your system - perfect for verification before bulk operations.`,
 					w.Writeln(Message{Text: fmt.Sprintf("Would add %d files:", len(files)), Emoji: "🔍", Bold: true})
 				}
 
-				// List files that would be added
+				// List files using home-relative paths so duplicate basenames remain distinguishable.
+				// Dry-run is a preview for verification, so show all files.
 				for _, file := range files {
-					basename := filepath.Base(file)
 					w.WriteString("   ").
-						Writeln(Message{Text: basename, Emoji: "📄"})
+						Writeln(Message{Text: displaySourcePath(file), Emoji: "📄"})
 				}
 
 				w.WritelnString("").
@@ -73,22 +70,27 @@ changes to your system - perfect for verification before bulk operations.`,
 			// Handle recursive mode
 			if recursive {
 				// Get preview to count files first for better output
-				previewFiles, err := lnk.PreviewAdd(args, recursive)
+				previewFiles, err := l.PreviewAdd(args, recursive)
 				if err != nil {
 					return err
 				}
 
-				// Create progress callback for CLI display
-				progressCallback := func(current, total int, currentFile string) {
-					w.WriteString(fmt.Sprintf("\r⏳ Processing %d/%d: %s", current, total, currentFile))
+				// Only show carriage-return progress when output is a terminal;
+				// in piped/non-TTY contexts the redraw becomes noise.
+				var progressCallback lnk.ProgressCallback
+				if w.IsTerminal() {
+					progressCallback = func(current, total int, currentFile string) {
+						w.WriteString(fmt.Sprintf("\r⏳ Processing %d/%d: %s", current, total, currentFile))
+					}
 				}
 
-				if err := lnk.AddRecursiveWithProgress(args, progressCallback); err != nil {
+				if err := l.AddRecursiveWithProgress(args, progressCallback); err != nil {
 					return err
 				}
 
-				// Clear progress line and show completion
-				w.WriteString("\r")
+				if w.IsTerminal() {
+					w.WriteString("\r")
+				}
 
 				// Store processed file count for display
 				args = previewFiles // Replace args with actual files for display
@@ -97,22 +99,11 @@ changes to your system - perfect for verification before bulk operations.`,
 				if len(args) == 1 {
 					// Single file - use existing Add method for backward compatibility
 					if err := lnk.Add(args[0]); err != nil {
-						// If Error FileNotExists and Force - Create and Add
-						var addErr *error2.Error
-						if errors.As(err, &addErr) {
-							if addErr.Err == fs.ErrFileNotExists && force {
-								if err := lnk.Create(args[0]); err != nil {
-									return err
-								}
-								w.Writeln(Colored(fmt.Sprintf("%s didn't exist - created", args[0]), ColorCyan))
-							} else {
-								return err
-							}
-						}
+						return err
 					}
 				} else {
 					// Multiple files - use AddMultiple for atomic operation
-					if err := lnk.AddMultiple(args); err != nil {
+					if err := l.AddMultiple(args); err != nil {
 						return err
 					}
 				}
@@ -129,28 +120,20 @@ changes to your system - perfect for verification before bulk operations.`,
 
 				// Show some of the files that were added (limit to first few for readability)
 				filesToShow := len(args)
-				if filesToShow > 5 {
-					filesToShow = 5
+				if filesToShow > displayLimit {
+					filesToShow = displayLimit
 				}
 
 				for i := 0; i < filesToShow; i++ {
-					basename := filepath.Base(args[i])
-					if host != "" {
-						w.WriteString("   ").
-							Write(Link(basename)).
-							WriteString(" → ").
-							Writeln(Colored(fmt.Sprintf("~/.config/lnk/%s.lnk/...", host), ColorCyan))
-					} else {
-						w.WriteString("   ").
-							Write(Link(basename)).
-							WriteString(" → ").
-							Writeln(Colored("~/.config/lnk/...", ColorCyan))
-					}
+					w.WriteString("   ").
+						Write(Link(displaySourcePath(args[i]))).
+						WriteString(" → ").
+						Writeln(Colored(lnk.FormatManagedPath(host, args[i]), ColorCyan))
 				}
 
-				if len(args) > 5 {
+				if len(args) > displayLimit {
 					w.WriteString("   ").
-						Writeln(Colored(fmt.Sprintf("... and %d more files", len(args)-5), ColorGray))
+						Writeln(Colored(fmt.Sprintf("... and %d more files", len(args)-displayLimit), ColorGray))
 				}
 			} else if len(args) == 1 {
 				// Single file - maintain existing output format for backward compatibility
@@ -158,17 +141,13 @@ changes to your system - perfect for verification before bulk operations.`,
 				basename := filepath.Base(filePath)
 				if host != "" {
 					w.Writeln(Sparkles(fmt.Sprintf("Added %s to lnk (host: %s)", basename, host)))
-					w.WriteString("   ").
-						Write(Link(filePath)).
-						WriteString(" → ").
-						Writeln(Colored(fmt.Sprintf("~/.config/lnk/%s.lnk/%s", host, filePath), ColorCyan))
 				} else {
 					w.Writeln(Sparkles(fmt.Sprintf("Added %s to lnk", basename)))
-					w.WriteString("   ").
-						Write(Link(filePath)).
-						WriteString(" → ").
-						Writeln(Colored(fmt.Sprintf("~/.config/lnk/%s", filePath), ColorCyan))
 				}
+				w.WriteString("   ").
+					Write(Link(filePath)).
+					WriteString(" → ").
+					Writeln(Colored(lnk.FormatManagedPath(host, filePath), ColorCyan))
 			} else {
 				// Multiple files - show summary
 				if host != "" {
@@ -177,20 +156,21 @@ changes to your system - perfect for verification before bulk operations.`,
 					w.Writeln(Sparkles(fmt.Sprintf("Added %d items to lnk", len(args))))
 				}
 
-				// List each added file
-				for _, filePath := range args {
-					basename := filepath.Base(filePath)
-					if host != "" {
-						w.WriteString("   ").
-							Write(Link(basename)).
-							WriteString(" → ").
-							Writeln(Colored(fmt.Sprintf("~/.config/lnk/%s.lnk/...", host), ColorCyan))
-					} else {
-						w.WriteString("   ").
-							Write(Link(basename)).
-							WriteString(" → ").
-							Writeln(Colored("~/.config/lnk/...", ColorCyan))
-					}
+				// List each added file using home-relative source paths so same-basename
+				// files in different directories stay distinguishable. Truncate large batches.
+				filesToShow := len(args)
+				if filesToShow > displayLimit {
+					filesToShow = displayLimit
+				}
+				for i := 0; i < filesToShow; i++ {
+					w.WriteString("   ").
+						Write(Link(displaySourcePath(args[i]))).
+						WriteString(" → ").
+						Writeln(Colored(lnk.FormatManagedPath(host, args[i]), ColorCyan))
+				}
+				if len(args) > displayLimit {
+					w.WriteString("   ").
+						Writeln(Colored(fmt.Sprintf("... and %d more files", len(args)-displayLimit), ColorGray))
 				}
 			}
 
@@ -208,4 +188,21 @@ changes to your system - perfect for verification before bulk operations.`,
 	cmd.Flags().BoolP("dry-run", "n", false, "Show what would be added without making changes")
 	cmd.Flags().Bool("force", false, "Force add a file or directory even if it doesn't exist (WARNING: check file or directory permissions as needed)")
 	return cmd
+}
+
+// displayLimit caps the number of per-file entries shown in batch summaries
+// before collapsing the remainder into "... and N more files".
+const displayLimit = 5
+
+// displaySourcePath renders a path (relative or absolute) as a home-relative
+// (~/foo) display string, falling back to the original input on resolution
+// failure. Used so duplicate basenames in different directories remain
+// distinguishable in preview and batch output. The Abs call is idempotent
+// for paths already absolute (from PreviewAdd) and normalizes relative paths.
+func displaySourcePath(p string) string {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return p
+	}
+	return lnk.DisplayPath(abs)
 }
