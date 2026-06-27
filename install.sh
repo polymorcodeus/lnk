@@ -57,7 +57,7 @@ get_latest_version() {
     redirect_url=$(curl -s -I "https://github.com/${REPO}/releases/latest" | grep -i "^location:" | sed 's/\r$//' | cut -d' ' -f2-)
 
     if [ -z "$redirect_url" ]; then
-        echo -e "${YELLOW}⚠ Could not get redirect URL, using fallback version ${FALLBACK_VERSION}${NC}" >&2
+        echo -e "${YELLOW}Could not get redirect URL, using fallback version ${FALLBACK_VERSION}${NC}" >&2
         echo "$FALLBACK_VERSION"
         return 0
     fi
@@ -67,7 +67,7 @@ get_latest_version() {
     version=$(echo "$redirect_url" | sed -E 's|.*/releases/tag/([^/]*)\s*$|\1|')
 
     if [ -z "$version" ] || [ "$version" = "$redirect_url" ]; then
-        echo -e "${YELLOW}⚠ Could not parse version from redirect URL: $redirect_url${NC}" >&2
+        echo -e "${YELLOW}Could not parse version from redirect URL: $redirect_url${NC}" >&2
         echo -e "${YELLOW}Using fallback version ${FALLBACK_VERSION}${NC}" >&2
         echo "$FALLBACK_VERSION"
         return 0
