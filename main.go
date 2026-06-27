@@ -1,11 +1,12 @@
+// Package main is the entry point for the lnk CLI.
 package main
 
-import "github.com/yarlson/lnk/cmd"
+import "github.com/polymorcodeus/lnk/cmd"
 
-// These variables are set by GoReleaser via ldflags
+// version and buildTime are set by GoReleaser via ldflags at build time.
 var (
-	version   = "dev"
-	buildTime = "unknown"
+	version   = "v1.0.0"
+	buildTime = "local"
 )
 
 func main() {

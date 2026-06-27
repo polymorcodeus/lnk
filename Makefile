@@ -20,7 +20,7 @@ NC=\033[0m # No Color
 
 ## help: Show this help message
 help:
-	@echo "$(BLUE)Lnk CLI - Available targets:$(NC)"
+	@echo "$(BLUE)lnk CLI - Available targets:$(NC)"
 	@echo ""
 	@echo "$(GREEN)Development:$(NC)"
 	@echo "  build       Build the binary"

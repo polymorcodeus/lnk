@@ -13,11 +13,19 @@ linters:
       checks:
         - all
         - -ST1005 # Allow capitalized error strings and punctuation
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+      
 
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
 
+
 run:
   timeout: 5m
   tests: true
+

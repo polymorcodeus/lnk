@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 env:
-  GO_VERSION: "1.25"
+  GO_VERSION: "1.26"
 
 jobs:
   test:
@@ -45,11 +45,6 @@ jobs:
 
       - name: Test
         run: go test -v -race -coverprofile=coverage.out ./...
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v6
-        with:
-          files: ./coverage.out
 
   lint:
     runs-on: ubuntu-latest
