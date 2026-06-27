@@ -17,7 +17,7 @@ var (
 	buildTime = "local"
 )
 
-// use embeded VERSION file for local `go install`d versions
+// use embeded VERSION file for local `go install`d version
 func init() {
 	if version == "" {
 		version = strings.TrimSpace(versionFile)
