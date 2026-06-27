@@ -3,23 +3,22 @@ package fs
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
-	"github.com/yarlson/lnk/internal/lnkerror"
+	"github.com/polymorcodeus/lnk/internal/lnkerror"
 )
 
 // Sentinel errors for file system operations.
 var (
-	ErrFileNotExists   = errors.New("File or directory not found")
-	ErrFileCheck       = errors.New("Unable to access file. Please check file permissions and try again.")
-	ErrUnsupportedType = errors.New("Cannot manage this type of file")
-	ErrNotManaged      = errors.New("File is not managed by lnk")
-	ErrSymlinkRead     = errors.New("Unable to read symlink. The file may be corrupted or have invalid permissions.")
-	ErrDirCreate       = errors.New("Failed to create directory. Please check permissions and available disk space.")
-	ErrRelativePath    = errors.New("Unable to create symlink due to path configuration issues. Please check file locations.")
+	ErrFileNotExists   = errors.New("file or directory not found")
+	ErrFileCheck       = errors.New("unable to access file. Please check file permissions and try again.")
+	ErrUnsupportedType = errors.New("cannot manage this type of file")
+	ErrSymlinkRead     = errors.New("unable to read symlink. The file may be corrupted or have invalid permissions.")
+	ErrDirCreate       = errors.New("failed to create directory. Please check permissions and available disk space.")
+	ErrRelativePath    = errors.New("unable to create symlink due to path configuration issues. Please check file locations.")
 )
 
 // FileSystem handles file system operations
@@ -30,32 +29,34 @@ func New() *FileSystem {
 	return &FileSystem{}
 }
 
-// ValidateFileForAdd validates that a file or directory can be added to lnk
-func (fs *FileSystem) ValidateFileForAdd(filePath string) error {
-	// Check if file exists and get its info
-	info, err := os.Stat(filePath)
+// ValidateFileInfoForAdd validates that a file or directory can be added to lnk.
+func (fs *FileSystem) ValidateFileInfoForAdd(filePath string) (os.FileInfo, error) {
+	info, err := os.Lstat(filePath)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return lnkerror.WithPath(ErrFileNotExists, filePath)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, lnkerror.WithPath(ErrFileNotExists, filePath)
 		}
 
-		return lnkerror.WithPath(ErrFileCheck, filePath)
+		return nil, lnkerror.WithPath(ErrFileCheck, filePath)
 	}
 
-	// Allow both regular files and directories
+	// Reject symlinks explicitly
+	if info.Mode()&os.ModeSymlink != 0 {
+		return nil, lnkerror.WithPathAndSuggestion(ErrUnsupportedType, filePath, "lnk can only manage regular files and directories")
+	}
+
 	if !info.Mode().IsRegular() && !info.IsDir() {
-		return lnkerror.WithPathAndSuggestion(ErrUnsupportedType, filePath, "lnk can only manage regular files and directories")
+		return nil, lnkerror.WithPathAndSuggestion(ErrUnsupportedType, filePath, "lnk can only manage regular files and directories")
 	}
 
-	return nil
+	return info, nil
 }
 
 // ValidateSymlinkForRemove validates that a symlink can be removed from lnk
 func (fs *FileSystem) ValidateSymlinkForRemove(filePath, repoPath string) error {
-	// Check if file exists and is a symlink
-	info, err := os.Lstat(filePath) // Use Lstat to not follow symlinks
+	info, err := os.Lstat(filePath)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			return lnkerror.WithPath(ErrFileNotExists, filePath)
 		}
 
@@ -63,10 +64,9 @@ func (fs *FileSystem) ValidateSymlinkForRemove(filePath, repoPath string) error 
 	}
 
 	if info.Mode()&os.ModeSymlink == 0 {
-		return lnkerror.WithPathAndSuggestion(ErrNotManaged, filePath, "use 'lnk add' to manage this file first")
+		return lnkerror.WithPathAndSuggestion(lnkerror.ErrNotManaged, filePath, "use 'lnk add' to manage this file first")
 	}
 
-	// Get symlink target and resolve to absolute path
 	target, err := os.Readlink(filePath)
 	if err != nil {
 		return lnkerror.WithPath(ErrSymlinkRead, filePath)
@@ -76,12 +76,11 @@ func (fs *FileSystem) ValidateSymlinkForRemove(filePath, repoPath string) error 
 		target = filepath.Join(filepath.Dir(filePath), target)
 	}
 
-	// Clean paths and check if target is inside the repository
 	target = filepath.Clean(target)
 	repoPath = filepath.Clean(repoPath)
 
 	if !strings.HasPrefix(target, repoPath+string(filepath.Separator)) && target != repoPath {
-		return lnkerror.WithPathAndSuggestion(ErrNotManaged, filePath, "use 'lnk add' to manage this file first")
+		return lnkerror.WithPathAndSuggestion(lnkerror.ErrNotManaged, filePath, "use 'lnk add' to manage this file first")
 	}
 
 	return nil
@@ -97,53 +96,72 @@ func (fs *FileSystem) Move(src, dst string, info os.FileInfo) error {
 
 // MoveFile moves a file from source to destination
 func (fs *FileSystem) MoveFile(src, dst string) error {
-	// Ensure destination directory exists
 	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
 		return lnkerror.WithPath(ErrDirCreate, filepath.Dir(dst))
 	}
 
-	// Move the file
 	return os.Rename(src, dst)
 }
 
 // CreateSymlink creates a relative symlink from target to linkPath
 func (fs *FileSystem) CreateSymlink(target, linkPath string) error {
-	// Calculate relative path from linkPath to target
 	relTarget, err := filepath.Rel(filepath.Dir(linkPath), target)
 	if err != nil {
 		return lnkerror.Wrap(ErrRelativePath)
 	}
 
-	// Create the symlink
 	return os.Symlink(relTarget, linkPath)
 }
 
 // MoveDirectory moves a directory from source to destination recursively
 func (fs *FileSystem) MoveDirectory(src, dst string) error {
-	// Ensure destination parent directory exists
 	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
 		return lnkerror.WithPath(ErrDirCreate, filepath.Dir(dst))
 	}
 
-	// Move the directory
 	return os.Rename(src, dst)
 }
 
-// GetRelativePath converts an absolute path to a relative path from the home directory.
-func GetRelativePath(absPath string) (string, error) {
-	homeDir, err := os.UserHomeDir()
+// RemoveEmptyDirs removes all empty directories underneath root path
+func RemoveEmptyDirs(rootPath string) error {
+	var dirs []string
+
+	err := filepath.WalkDir(rootPath, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() && path != rootPath {
+			dirs = append(dirs, path)
+		}
+		return nil
+	})
 	if err != nil {
-		return "", fmt.Errorf("failed to get home directory: %w", err)
+		return err
+	}
+	slices.SortFunc(dirs, func(a, b string) int {
+		return strings.Count(b, string(os.PathSeparator)) - strings.Count(a, string(os.PathSeparator))
+	})
+
+	for _, dir := range dirs {
+		isEmpty, err := isDirEmpty(dir)
+		if err != nil {
+			return err
+		}
+		if isEmpty {
+			if err := os.Remove(dir); err != nil {
+				return err
+			}
+		}
 	}
 
-	relPath, err := filepath.Rel(homeDir, absPath)
+	return nil
+}
+
+// isDirEmpty reports whether a directory contains any entries.
+func isDirEmpty(name string) (bool, error) {
+	entries, err := os.ReadDir(name)
 	if err != nil {
-		return "", fmt.Errorf("failed to get relative path: %w", err)
+		return false, err
 	}
-
-	if strings.HasPrefix(relPath, "..") {
-		return strings.TrimPrefix(absPath, "/"), nil
-	}
-
-	return relPath, nil
+	return len(entries) == 0, nil
 }

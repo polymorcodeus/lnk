@@ -78,25 +78,24 @@ changelog:
 # GitHub release configuration
 release:
   github:
-    owner: yarlson
+    owner: polymorcodeus
     name: lnk
   draft: false
   prerelease: auto
   mode: replace
   header: |
-    ## Lnk {{.Tag}}
+    ## lnk {{.Tag}}
 
-    Git-native dotfiles management that doesn't suck.
+    lightweight git-native dotfiles management
 
     ### Installation
 
     ```bash
     # Quick install
-    curl -sSL https://raw.githubusercontent.com/yarlson/lnk/main/install.sh | bash
+    curl -sSL https://raw.githubusercontent.com/polymorcodeus/lnk/main/install.sh | bash
 
     # Homebrew
-    brew tap yarlson/lnk
-    brew install lnk
+    # not yet supported
 
     # Manual download
     # Download the appropriate archive for your platform from the assets below
@@ -106,37 +105,6 @@ release:
 
   footer: |
     ---
-    **Full Changelog**: https://github.com/yarlson/lnk/compare/{{.PreviousTag}}...{{.Tag}}
+    **Full Changelog**: https://github.com/polymorcodeus/lnk/compare/{{.PreviousTag}}...{{.Tag}}
 
 # Homebrew tap
-brews:
-  - repository:
-      owner: yarlson
-      name: homebrew-lnk
-      branch: main
-      token: "{{ .Env.GITHUB_TOKEN }}"
-    homepage: "https://github.com/yarlson/lnk"
-    description: "Git-native dotfiles management that doesn't suck"
-    license: "MIT"
-    skip_upload: auto
-    commit_author:
-      name: goreleaserbot
-      email: bot@goreleaser.com
-    commit_msg_template: "Brew formula update for {{ .ProjectName }} version {{ .Tag }}"
-    test: |
-      system "#{bin}/lnk --version"
-    install: |
-      bin.install "lnk"
-
-# Docker images (optional)
-# dockers:
-#   - image_templates:
-#       - "yarlson/lnk:latest"
-#       - "yarlson/lnk:{{ .Tag }}"
-#       - "yarlson/lnk:v{{ .Major }}"
-#     dockerfile: Dockerfile
-#     build_flag_templates:
-#       - "--label=org.opencontainers.image.created={{.Date}}"
-#       - "--label=org.opencontainers.image.title={{.ProjectName}}"
-#       - "--label=org.opencontainers.image.revision={{.FullCommit}}"
-#       - "--label=org.opencontainers.image.version={{.Version}}"

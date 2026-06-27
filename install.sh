@@ -13,7 +13,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # GitHub repository
-REPO="yarlson/lnk"
+REPO="polymorcodeus/lnk"
 INSTALL_DIR="/usr/local/bin"
 BINARY_NAME="lnk"
 
@@ -157,12 +157,12 @@ install_lnk() {
 
 # Check if running with --help
 if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
-    echo "Lnk installer script"
+    echo "lnk installer script"
     echo ""
     echo "Usage:"
-    echo "  curl -sSL https://raw.githubusercontent.com/yarlson/lnk/main/install.sh | bash"
-    echo "  curl -sSL https://raw.githubusercontent.com/yarlson/lnk/main/install.sh | bash -s v0.0.1"
-    echo "  LNK_VERSION=v0.0.1 curl -sSL https://raw.githubusercontent.com/yarlson/lnk/main/install.sh | bash"
+    echo "  curl -sSL https://raw.githubusercontent.com/polymorcodeus/lnk/main/install.sh | bash"
+    echo "  curl -sSL https://raw.githubusercontent.com/polymorcodeus/lnk/main/install.sh | bash -s v0.0.1"
+    echo "  LNK_VERSION=v0.0.1 curl -sSL https://raw.githubusercontent.com/polymorcodeus/lnk/main/install.sh | bash"
     echo ""
     echo "This script will:"
     echo "  1. Detect your OS and architecture"
@@ -172,7 +172,7 @@ if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
     echo "Environment variables:"
     echo "  LNK_VERSION - Specify version to install (e.g., v0.0.1)"
     echo ""
-    echo "Manual installation: https://github.com/yarlson/lnk/releases"
+    echo "Manual installation: https://github.com/polymorcodeus/lnk/releases"
     exit 0
 fi
 

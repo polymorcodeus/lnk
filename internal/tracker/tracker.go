@@ -2,23 +2,36 @@
 package tracker
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strings"
+)
+
+type RepoFormat int
+
+const (
+	FormatUnknown RepoFormat = 0 // repo not yet initialized
+	FormatV1      RepoFormat = 1 // legacy: dotfiles in root
+	FormatV2      RepoFormat = 2 // current: common.lnk subdir
 )
 
 // Tracker manages the .lnk tracking file that records which files are managed.
 type Tracker struct {
 	repoPath string
 	host     string
+	format   RepoFormat
 }
 
 // New creates a new Tracker.
-func New(repoPath, host string) *Tracker {
-	return &Tracker{repoPath: repoPath, host: host}
+func New(repoPath, host string, format RepoFormat) *Tracker {
+	return &Tracker{
+		repoPath: repoPath,
+		host:     host,
+		format:   format,
+	}
 }
 
 // RepoPath returns the repository path.
@@ -27,31 +40,48 @@ func (t *Tracker) RepoPath() string {
 }
 
 // LnkFileName returns the appropriate .lnk tracking file name.
-func (t *Tracker) LnkFileName() string {
-	if t.host == "" {
-		return ".lnk"
+func (t *Tracker) LnkFileName() (string, error) {
+	if t.host == "common" {
+		switch t.format {
+		case FormatV2:
+			return ".lnk.common", nil
+		case FormatV1:
+			return ".lnk", nil
+		default:
+			return "", fmt.Errorf("repo format not initialized, run 'lnk init' first")
+		}
 	}
-	return ".lnk." + t.host
+	return ".lnk." + t.host, nil
 }
 
 // HostStoragePath returns the storage path for host-specific or common files.
-func (t *Tracker) HostStoragePath() string {
-	if t.host == "" {
-		return t.repoPath
+func (t *Tracker) HostStoragePath() (string, error) {
+	if t.host == "common" {
+		switch t.format {
+		case FormatV2:
+			return filepath.Join(t.repoPath, "common.lnk"), nil
+		case FormatV1:
+			return t.repoPath, nil
+		default:
+			return "", fmt.Errorf("repo format not initialized, run 'lnk init' first")
+		}
 	}
-	return filepath.Join(t.repoPath, t.host+".lnk")
+	return filepath.Join(t.repoPath, t.host+".lnk"), nil
 }
 
 // GetManagedItems returns the list of managed files and directories from .lnk file.
 func (t *Tracker) GetManagedItems() ([]string, error) {
-	lnkFile := filepath.Join(t.repoPath, t.LnkFileName())
-
-	if _, err := os.Stat(lnkFile); os.IsNotExist(err) {
-		return []string{}, nil
+	filename, err := t.LnkFileName()
+	if err != nil {
+		return []string{}, err
 	}
+	lnkFile := filepath.Join(t.repoPath, filename)
 
 	content, err := os.ReadFile(lnkFile)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return []string{}, nil
+		}
 		return nil, fmt.Errorf("failed to read .lnk file: %w", err)
 	}
 
@@ -83,7 +113,7 @@ func (t *Tracker) AddManagedItem(relativePath string) error {
 	}
 
 	items = append(items, relativePath)
-	sort.Strings(items)
+	slices.Sort(items)
 
 	return t.WriteManagedItems(items)
 }
@@ -95,26 +125,27 @@ func (t *Tracker) RemoveManagedItem(relativePath string) error {
 		return fmt.Errorf("failed to get managed items: %w", err)
 	}
 
-	var newItems []string
-	for _, item := range items {
-		if item != relativePath {
-			newItems = append(newItems, item)
-		}
-	}
+	newItems := slices.DeleteFunc(slices.Clone(items), func(item string) bool {
+		return item == relativePath
+	})
 
 	return t.WriteManagedItems(newItems)
 }
 
 // WriteManagedItems writes the list of managed items to .lnk file.
 func (t *Tracker) WriteManagedItems(items []string) error {
-	lnkFile := filepath.Join(t.repoPath, t.LnkFileName())
+	filename, err := t.LnkFileName()
+	if err != nil {
+		return err
+	}
+	lnkFile := filepath.Join(t.repoPath, filename)
 
 	content := strings.Join(items, "\n")
 	if len(items) > 0 {
 		content += "\n"
 	}
 
-	err := os.WriteFile(lnkFile, []byte(content), 0644)
+	err = os.WriteFile(lnkFile, []byte(content), 0644)
 	if err != nil {
 		return fmt.Errorf("failed to write .lnk file: %w", err)
 	}

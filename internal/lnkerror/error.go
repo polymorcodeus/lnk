@@ -5,14 +5,14 @@ import "errors"
 
 // Sentinel errors for lnk operations.
 var (
-	ErrManagedFilesExist = errors.New("Directory already contains managed files")
-	ErrGitRepoExists     = errors.New("Directory contains an existing Git repository")
-	ErrAlreadyManaged    = errors.New("File is already managed by lnk")
-	ErrNotManaged        = errors.New("File is not managed by lnk")
-	ErrNotInitialized    = errors.New("Lnk repository not initialized")
-	ErrBootstrapNotFound = errors.New("Bootstrap script not found")
-	ErrBootstrapFailed   = errors.New("Bootstrap script failed with error")
-	ErrBootstrapPerms    = errors.New("Failed to make bootstrap script executable")
+	ErrManagedFilesExist = errors.New("directory already contains managed files")
+	ErrGitRepoExists     = errors.New("directory contains an existing Git repository")
+	ErrAlreadyManaged    = errors.New("file is already managed by lnk")
+	ErrNotManaged        = errors.New("file is not managed by lnk")
+	ErrNotInitialized    = errors.New("lnk repository not initialized")
+	ErrBootstrapNotFound = errors.New("bootstrap script not found")
+	ErrBootstrapFailed   = errors.New("bootstrap script failed with error")
+	ErrBootstrapPerms    = errors.New("failed to make bootstrap script executable")
 )
 
 // Error wraps a sentinel error with optional context for display.
@@ -23,6 +23,7 @@ type Error struct {
 	Suggestion string // Optional suggestion for user
 }
 
+// Error implements the error interface, appending path and suggestion when present.
 func (e *Error) Error() string {
 	msg := e.Err.Error()
 	if e.Path != "" {
@@ -34,6 +35,7 @@ func (e *Error) Error() string {
 	return msg
 }
 
+// Unwrap returns the underlying sentinel error.
 func (e *Error) Unwrap() error {
 	return e.Err
 }

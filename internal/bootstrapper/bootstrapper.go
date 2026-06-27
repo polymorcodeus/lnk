@@ -7,21 +7,28 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"github.com/yarlson/lnk/internal/git"
-	"github.com/yarlson/lnk/internal/lnkerror"
+	"github.com/polymorcodeus/lnk/internal/lnkerror"
 )
+
+type commandRunner func(name string, arg ...string) *exec.Cmd
+
+type gitChecker interface {
+	IsGitRepository() bool
+}
 
 // Runner handles bootstrap script discovery and execution.
 type Runner struct {
 	repoPath string
-	git      *git.Git
+	git      gitChecker
+	runCmd   commandRunner // defaults to exec.Command in constructor
 }
 
 // New creates a new bootstrap Runner.
-func New(repoPath string, g *git.Git) *Runner {
+func New(repoPath string, g gitChecker) *Runner {
 	return &Runner{
 		repoPath: repoPath,
 		git:      g,
+		runCmd:   exec.Command,
 	}
 }
 
@@ -42,16 +49,11 @@ func (r *Runner) FindScript() (string, error) {
 // RunScript executes the bootstrap script with configurable I/O.
 func (r *Runner) RunScript(scriptName string, stdout, stderr io.Writer, stdin io.Reader) error {
 	scriptPath := filepath.Join(r.repoPath, scriptName)
-
-	if _, err := os.Stat(scriptPath); os.IsNotExist(err) {
-		return lnkerror.WithPath(lnkerror.ErrBootstrapNotFound, scriptName)
-	}
-
 	if err := os.Chmod(scriptPath, 0755); err != nil {
 		return lnkerror.Wrap(lnkerror.ErrBootstrapPerms)
 	}
 
-	cmd := exec.Command("bash", scriptPath)
+	cmd := r.runCmd("bash", scriptPath)
 	cmd.Dir = r.repoPath
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
