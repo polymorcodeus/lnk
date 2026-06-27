@@ -29,7 +29,7 @@ func NewRootCommand() *cobra.Command {
 
 	rootCmd := &cobra.Command{
 		Use:           "lnk",
-		Short:         "Git-native dotfiles management, v2",
+		Short:         "lightweight git-native dotfiles management",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Version:       fmt.Sprintf("%s (built %s)", version, buildTime),
