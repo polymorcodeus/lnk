@@ -92,7 +92,7 @@ get_version() {
 install_lnk() {
     local platform version
 
-    echo -e "${BLUE}🔗 Installing lnk...${NC}"
+    echo -e "${BLUE}Installing lnk...${NC}"
 
     platform=$(detect_platform)
     version=$(get_version "$1")
@@ -146,7 +146,7 @@ install_lnk() {
     cd - > /dev/null
     rm -rf "$tmp_dir"
 
-    echo -e "${GREEN}✅ lnk installed successfully!${NC}"
+    echo -e "${GREEN}lnk installed successfully!${NC}"
     echo -e "${GREEN}Run 'lnk --help' to get started.${NC}"
 
     # Test the installation
