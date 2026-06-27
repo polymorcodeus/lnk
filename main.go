@@ -1,13 +1,28 @@
 // Package main is the entry point for the lnk CLI.
 package main
 
-import "github.com/polymorcodeus/lnk/cmd"
+import (
+	_ "embed"
+	"strings"
+
+	"github.com/polymorcodeus/lnk/cmd"
+)
+
+//go:embed VERSION
+var versionFile string
 
 // version and buildTime are set by GoReleaser via ldflags at build time.
 var (
-	version   = "v1.0.0"
+	version   string
 	buildTime = "local"
 )
+
+// use embeded VERSION file for local `go install`d versions
+func init() {
+	if version == "" {
+		version = strings.TrimSpace(versionFile)
+	}
+}
 
 func main() {
 	cmd.SetVersion(version, buildTime)
