@@ -69,11 +69,12 @@ func (f *fakeFileSystem) ValidateSymlinkForRemove(absPath, repoPath string) erro
 }
 
 type fakeTracker struct {
-	lnkFileNameFunc       func() (string, error)
-	hostStoragePathFunc   func() (string, error)
-	addManagedItemFunc    func(path string) error
-	removeManagedItemFunc func(path string) error
-	getManagedItemsFunc   func() ([]string, error)
+	lnkFileNameFunc        func() (string, error)
+	hostStoragePathFunc    func() (string, error)
+	hostStorageRelPathFunc func() (string, error) // NEW
+	addManagedItemFunc     func(path string) error
+	removeManagedItemFunc  func(path string) error
+	getManagedItemsFunc    func() ([]string, error)
 }
 
 func (f *fakeTracker) LnkFileName() (string, error) {
@@ -86,6 +87,13 @@ func (f *fakeTracker) LnkFileName() (string, error) {
 func (f *fakeTracker) HostStoragePath() (string, error) {
 	if f.hostStoragePathFunc != nil {
 		return f.hostStoragePathFunc()
+	}
+	return "", errors.New("not implemented")
+}
+
+func (f *fakeTracker) HostStorageRelPath() (string, error) {
+	if f.hostStorageRelPathFunc != nil {
+		return f.hostStorageRelPathFunc()
 	}
 	return "", errors.New("not implemented")
 }
@@ -162,8 +170,9 @@ func TestManager_AddMultiple(t *testing.T) {
 			lnkFileNameFunc: func() (string, error) {
 				return filepath.Join("repo", ".lnk"), nil
 			},
-			hostStoragePathFunc: func() (string, error) { return storage, nil },
-			addManagedItemFunc:  func(path string) error { return nil },
+			hostStoragePathFunc:    func() (string, error) { return storage, nil },
+			hostStorageRelPathFunc: func() (string, error) { return "storage", nil }, // NEW
+			addManagedItemFunc:     func(path string) error { return nil },
 		}
 
 		fm := filemanager.New("repo", "host", fs, trk)
@@ -174,7 +183,8 @@ func TestManager_AddMultiple(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		wantPaths := []string{filepath.Join(storage, "foo"), filepath.Join("repo", ".lnk")}
+		// StagePaths now contains relative paths, not absolute
+		wantPaths := []string{filepath.Join("storage", "foo"), filepath.Join("repo", ".lnk")}
 		if len(result.StagePaths) != len(wantPaths) {
 			t.Fatalf("expected %d stage paths, got %d: %v", len(wantPaths), len(result.StagePaths), result.StagePaths)
 		}
@@ -207,9 +217,10 @@ func TestManager_AddMultiple(t *testing.T) {
 		}
 
 		trk := &fakeTracker{
-			lnkFileNameFunc:     func() (string, error) { return ".lnk", nil },
-			hostStoragePathFunc: func() (string, error) { return storage, nil },
-			addManagedItemFunc:  func(path string) error { return nil },
+			lnkFileNameFunc:        func() (string, error) { return ".lnk", nil },
+			hostStoragePathFunc:    func() (string, error) { return storage, nil },
+			hostStorageRelPathFunc: func() (string, error) { return "storage", nil },
+			addManagedItemFunc:     func(path string) error { return nil },
 		}
 
 		fm := filemanager.New("repo", "host", fs, trk)
@@ -248,9 +259,10 @@ func TestManager_AddMultiple(t *testing.T) {
 		}
 
 		trk := &fakeTracker{
-			lnkFileNameFunc:     func() (string, error) { return ".lnk", nil },
-			hostStoragePathFunc: func() (string, error) { return storage, nil },
-			addManagedItemFunc:  func(path string) error { return nil },
+			lnkFileNameFunc:        func() (string, error) { return ".lnk", nil },
+			hostStoragePathFunc:    func() (string, error) { return storage, nil },
+			hostStorageRelPathFunc: func() (string, error) { return "storage", nil },
+			addManagedItemFunc:     func(path string) error { return nil },
 		}
 
 		fm := filemanager.New("repo", "host", fs, trk)
@@ -282,8 +294,9 @@ func TestManager_AddMultiple(t *testing.T) {
 		}
 
 		trk := &fakeTracker{
-			lnkFileNameFunc:     func() (string, error) { return ".lnk", nil },
-			hostStoragePathFunc: func() (string, error) { return storage, nil },
+			lnkFileNameFunc:        func() (string, error) { return ".lnk", nil },
+			hostStoragePathFunc:    func() (string, error) { return storage, nil },
+			hostStorageRelPathFunc: func() (string, error) { return "storage", nil },
 			addManagedItemFunc: func(path string) error {
 				return errors.New("tracker locked")
 			},

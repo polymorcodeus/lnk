@@ -13,7 +13,6 @@ lnk init                                       # create a local repo
 lnk clone git@github.com:you/dotfiles.git      # clone a remote repo
 lnk add ~/.vimrc ~/.bashrc ~/.gitconfig        # track files
 lnk add --host work ~/.ssh/config              # per-machine config
-lnk commit -m "done"                           # commit changes
 lnk push                                       # push to remote
 lnk update                                     # pull and restore symlinks
 ```
@@ -26,29 +25,27 @@ lnk update                                     # pull and restore symlinks
 curl -sSL https://raw.githubusercontent.com/polymorcodeus/lnk/main/install.sh | bash
 ```
 
-Or with Homebrew:
-
-```bash
-brew install lnk
-```
-
 Or grab a binary from [releases](https://github.com/polymorcodeus/lnk/releases), or build from source:
 
 ```bash
 go install github.com/polymorcodeus/lnk@latest
 ```
 
+*NOTE:*
+
+Installing with Homebrew is not yet supported.
+
 ### Quick Start
 
 1. **Initialize** on a new machine:
 
    ```bash
-   lnk clone git@github.com:you/dotfiles.git
+   lnk clone git@github.com:you/dotfiles.git --bootstrap
    lnk update
    lnk update --host $(hostname)
    ```
 
-   That's it. Bootstrap runs automatically, symlinks get restored, you're working.
+   That's it. Bootstrap runs automatically (with flag), symlinks get restored, you're working.
 
 2. **Add** dotfiles on your daily machine:
 
@@ -59,7 +56,6 @@ go install github.com/polymorcodeus/lnk@latest
 3. **Sync** changes:
 
    ```bash
-   lnk commit -m "updated vim config"
    lnk push
    ```
 
@@ -121,8 +117,8 @@ lnk status                                # full git status output
 lnk status --color                        # colorized git status
 lnk diff                                  # uncommitted changes
 lnk diff --color                          # colorized diff
-lnk commit -m "updated vim config"        # stage and commit
-lnk commit                                # commit with default message
+lnk commit -m "updated vim config"        # stage and commit - not needed after `lnk add`
+lnk commit                                # commit with default message - not needed after `lnk add`
 lnk push                                  # push existing commits
 lnk pull                                  # pull repo changes
 lnk restore                               # restore symlinks (no pull)
