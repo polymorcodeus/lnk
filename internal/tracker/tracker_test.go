@@ -84,6 +84,42 @@ func TestTracker_HostStoragePath(t *testing.T) {
 	}
 }
 
+func TestTracker_HostStorageRelPath(t *testing.T) {
+	tests := []struct {
+		name   string
+		host   string
+		format tracker.RepoFormat
+		want   string
+		err    bool
+	}{
+		{"common v2", "common", tracker.FormatV2, "common.lnk", false},
+		{"common v1", "common", tracker.FormatV1, ".", false},
+		{"common unknown", "common", tracker.FormatUnknown, "", true},
+		{"host v2", "myhost", tracker.FormatV2, "myhost.lnk", false},
+		{"host v1", "myhost", tracker.FormatV1, "myhost.lnk", false},
+		{"host unknown", "myhost", tracker.FormatUnknown, "myhost.lnk", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tr := tracker.New("repo", tt.host, tt.format)
+			got, err := tr.HostStorageRelPath()
+			if tt.err {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("HostStorageRelPath() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestTracker_GetManagedItems(t *testing.T) {
 	tmp := t.TempDir()
 	tr := tracker.New(tmp, "common", tracker.FormatV2)

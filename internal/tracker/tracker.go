@@ -69,6 +69,22 @@ func (t *Tracker) HostStoragePath() (string, error) {
 	return filepath.Join(t.repoPath, t.host+".lnk"), nil
 }
 
+// HostStorageRelPath returns the storage path relative to the repo path for
+// host-specific or common files.
+func (t *Tracker) HostStorageRelPath() (string, error) {
+	if t.host == "common" {
+		switch t.format {
+		case FormatV2:
+			return filepath.Join("common.lnk"), nil
+		case FormatV1:
+			return ".", nil
+		default:
+			return "", fmt.Errorf("repo format not initialized, run 'lnk init' first")
+		}
+	}
+	return filepath.Join(t.host + ".lnk"), nil
+}
+
 // GetManagedItems returns the list of managed files and directories from .lnk file.
 func (t *Tracker) GetManagedItems() ([]string, error) {
 	filename, err := t.LnkFileName()

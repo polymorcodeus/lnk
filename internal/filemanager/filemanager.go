@@ -20,6 +20,7 @@ type fileSystem interface {
 type tracker interface {
 	LnkFileName() (string, error)
 	HostStoragePath() (string, error)
+	HostStorageRelPath() (string, error)
 	AddManagedItem(path string) error
 	RemoveManagedItem(path string) error
 	GetManagedItems() ([]string, error)
@@ -127,6 +128,12 @@ func (fm *Manager) processFiles(files []validatedFile) ([]string, []func() error
 		}
 		destPath := filepath.Join(storagePath, f.relativePath)
 
+		storageRelPath, err := fm.tracker.HostStorageRelPath()
+		if err != nil {
+			return nil, nil, err
+		}
+		relPath := filepath.Join(storageRelPath, f.relativePath)
+
 		destDir := filepath.Dir(destPath)
 		if err := os.MkdirAll(destDir, 0755); err != nil {
 			fm.RollbackAll(rollbackActions)
@@ -152,7 +159,7 @@ func (fm *Manager) processFiles(files []validatedFile) ([]string, []func() error
 		}
 
 		rollbackActions = append(rollbackActions, fm.createRollbackAction(f.absPath, destPath, f.relativePath, f.info))
-		paths = append(paths, destPath)
+		paths = append(paths, relPath)
 	}
 
 	return paths, rollbackActions, nil
