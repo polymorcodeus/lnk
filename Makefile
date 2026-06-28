@@ -55,13 +55,13 @@ help:
 build:
 	@echo "$(BLUE)Building $(BINARY_NAME)...$(NC)"
 	@go build $(LDFLAGS) -o $(BINARY_NAME) .
-	@echo "$(GREEN)✓ Build complete: $(BINARY_NAME)$(NC)"
+	@echo "$(GREEN)Build complete: $(BINARY_NAME)$(NC)"
 
 ## test: Run tests
 test:
 	@echo "$(BLUE)Running tests...$(NC)"
 	@go test ./...
-	@echo "$(GREEN)✓ Tests passed$(NC)"
+	@echo "$(GREEN)Tests passed$(NC)"
 
 ## test-v: Run tests with verbose output
 test-v:
@@ -74,7 +74,7 @@ test-cover:
 	@go test -v -cover ./...
 	@go test -coverprofile=coverage.out ./
 	@go tool cover -html=coverage.out -o coverage.html
-	@echo "$(GREEN)✓ Coverage report generated: coverage.html$(NC)"
+	@echo "$(GREEN)Coverage report generated: coverage.html$(NC)"
 
 ## run: Run the application
 run: build
@@ -91,45 +91,45 @@ dev:
 fmt:
 	@echo "$(BLUE)Formatting code...$(NC)"
 	@go fmt ./...
-	@echo "$(GREEN)✓ Code formatted$(NC)"
+	@echo "$(GREEN)Code formatted$(NC)"
 
 ## lint: Run golangci-lint
 lint:
 	@echo "$(BLUE)Running linter...$(NC)"
 	@if command -v golangci-lint >/dev/null 2>&1; then \
 		golangci-lint run; \
-		echo "$(GREEN)✓ Linting complete$(NC)"; \
+		echo "$(GREEN)Linting complete$(NC)"; \
 	else \
-		echo "$(YELLOW)⚠ golangci-lint not found. Install with: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest$(NC)"; \
+		echo "$(YELLOW)golangci-lint not found. Install with: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest$(NC)"; \
 	fi
 
 ## vet: Run go vet
 vet:
 	@echo "$(BLUE)Running go vet...$(NC)"
 	@go vet ./...
-	@echo "$(GREEN)✓ Vet check passed$(NC)"
+	@echo "$(GREEN)Vet check passed$(NC)"
 
 ## tidy: Tidy Go modules
 tidy:
 	@echo "$(BLUE)Tidying modules...$(NC)"
 	@go mod tidy
-	@echo "$(GREEN)✓ Modules tidied$(NC)"
+	@echo "$(GREEN)Modules tidied$(NC)"
 
 ## check: Run all quality checks
 check: fmt vet lint test
-	@echo "$(GREEN)✓ All quality checks passed$(NC)"
+	@echo "$(GREEN)All quality checks passed$(NC)"
 
 ## install: Install binary to /usr/local/bin
 install: build
 	@echo "$(BLUE)Installing $(BINARY_NAME) to /usr/local/bin...$(NC)"
 	@sudo cp $(BINARY_NAME) /usr/local/bin/
-	@echo "$(GREEN)✓ $(BINARY_NAME) installed$(NC)"
+	@echo "$(GREEN)$(BINARY_NAME) installed$(NC)"
 
 ## uninstall: Remove binary from /usr/local/bin
 uninstall:
 	@echo "$(BLUE)Uninstalling $(BINARY_NAME)...$(NC)"
 	@sudo rm -f /usr/local/bin/$(BINARY_NAME)
-	@echo "$(GREEN)✓ $(BINARY_NAME) uninstalled$(NC)"
+	@echo "$(GREEN)$(BINARY_NAME) uninstalled$(NC)"
 
 ## cross-compile: Build for multiple platforms
 cross-compile: clean
@@ -140,13 +140,13 @@ cross-compile: clean
 	@GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o dist/$(BINARY_NAME)-darwin-amd64 .
 	@GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o dist/$(BINARY_NAME)-darwin-arm64 .
 	@GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o dist/$(BINARY_NAME)-windows-amd64.exe .
-	@echo "$(GREEN)✓ Cross-compilation complete. Binaries in dist/$(NC)"
+	@echo "$(GREEN)Cross-compilation complete. Binaries in dist/$(NC)"
 
 ## release: Create release builds with checksums
 release: cross-compile
 	@echo "$(BLUE)Creating release artifacts...$(NC)"
 	@cd dist && sha256sum * > checksums.txt
-	@echo "$(GREEN)✓ Release artifacts created in dist/$(NC)"
+	@echo "$(GREEN)Release artifacts created in dist/$(NC)"
 
 ## clean: Clean build artifacts
 clean:
@@ -154,7 +154,7 @@ clean:
 	@rm -f $(BINARY_NAME)
 	@rm -rf dist/
 	@rm -f coverage.out coverage.html
-	@echo "$(GREEN)✓ Clean complete$(NC)"
+	@echo "$(GREEN)Clean complete$(NC)"
 
 ## deps: Install development dependencies
 deps:
@@ -164,23 +164,23 @@ deps:
 		echo "$(BLUE)Installing GoReleaser...$(NC)"; \
 		go install github.com/goreleaser/goreleaser@latest; \
 	fi
-	@echo "$(GREEN)✓ Dependencies installed$(NC)"
+	@echo "$(GREEN)Dependencies installed$(NC)"
 
 ## goreleaser-check: Validate GoReleaser configuration
 goreleaser-check:
 	@echo "$(BLUE)Validating GoReleaser configuration...$(NC)"
 	@if command -v goreleaser >/dev/null 2>&1; then \
 		goreleaser check; \
-		echo "$(GREEN)✓ GoReleaser configuration is valid$(NC)"; \
+		echo "$(GREEN)GoReleaser configuration is valid$(NC)"; \
 	else \
-		echo "$(YELLOW)⚠ GoReleaser not found. Install with: make deps$(NC)"; \
+		echo "$(YELLOW)GoReleaser not found. Install with: make deps$(NC)"; \
 	fi
 
 ## goreleaser-snapshot: Build snapshot release with GoReleaser
 goreleaser-snapshot: goreleaser-check
 	@echo "$(BLUE)Building snapshot release with GoReleaser...$(NC)"
 	@goreleaser build --snapshot --clean
-	@echo "$(GREEN)✓ Snapshot release built in dist/$(NC)"
+	@echo "$(GREEN)Snapshot release built in dist/$(NC)"
 
 # Default target
 all: check build 
