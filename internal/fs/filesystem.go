@@ -14,11 +14,11 @@ import (
 // Sentinel errors for file system operations.
 var (
 	ErrFileNotExists   = errors.New("file or directory not found")
-	ErrFileCheck       = errors.New("unable to access file. Please check file permissions and try again.")
+	ErrFileCheck       = errors.New("unable to access file please check file permissions and try again")
 	ErrUnsupportedType = errors.New("cannot manage this type of file")
-	ErrSymlinkRead     = errors.New("unable to read symlink. The file may be corrupted or have invalid permissions.")
-	ErrDirCreate       = errors.New("failed to create directory. Please check permissions and available disk space.")
-	ErrRelativePath    = errors.New("unable to create symlink due to path configuration issues. Please check file locations.")
+	ErrSymlinkRead     = errors.New("unable to read symlink the file may be corrupted or have invalid permissions")
+	ErrDirCreate       = errors.New("failed to create directory please check permissions and available disk space")
+	ErrRelativePath    = errors.New("unable to create symlink due to path configuration issues please check file locations")
 )
 
 // FileSystem handles file system operations
