@@ -12,7 +12,6 @@ linters:
     staticcheck:
       checks:
         - all
-        - -ST1005 # Allow capitalized error strings and punctuation
   exclusions:
     rules:
       - path: _test\.go
