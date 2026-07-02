@@ -54,6 +54,7 @@ func NewRootCommand() *cobra.Command {
 	rootCmd.AddCommand(newDoctorCmd(&repoPath))
 	rootCmd.AddCommand(newBootstrapCmd(&repoPath))
 	rootCmd.AddCommand(newFormatCmd(&repoPath))
+	rootCmd.AddCommand(newHomeCmd(&repoPath))
 
 	return rootCmd
 }
@@ -86,6 +87,19 @@ func newInitCmd(repoFlag *string) *cobra.Command {
 				return err
 			}
 			_, err := fmt.Fprintf(cmd.OutOrStdout(), "Initialized repo at %s\n", app.RepoPath())
+			return err
+		},
+	}
+}
+
+// newHomeCmd returns the "home" subcommand.
+func newHomeCmd(repoFlag *string) *cobra.Command {
+	return &cobra.Command{
+		Use:   "home",
+		Short: "Returns resolved lnk repo path",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := svc(repoFlag)
+			_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s", app.RepoPath())
 			return err
 		},
 	}
