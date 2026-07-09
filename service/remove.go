@@ -31,7 +31,13 @@ func (s *Service) Remove(ctx context.Context, host, input string) error {
 	if err != nil {
 		return err
 	}
-	if err := s.execGit(ctx, append([]string{"rm", "--cached"}, removeResult.RemovePaths...)...); err != nil {
+
+	removeArgs := []string{"rm", "--cached"}
+	if removeResult.IsDir {
+		removeArgs = append(removeArgs, "-r")
+	}
+	removeArgs = append(removeArgs, removeResult.RemovePaths...)
+	if err := s.execGit(ctx, removeArgs...); err != nil {
 		return err
 	}
 	if err := s.stagePaths(removeResult.StagePaths...); err != nil {

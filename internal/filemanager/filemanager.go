@@ -59,6 +59,7 @@ type AddResult struct {
 type RemoveResult struct {
 	StagePaths  []string     // tracker file
 	RemovePaths []string     // paths to `git rm --cached`
+	IsDir       bool         // used to remove directory
 	RestoreFn   func() error // moves file back after git work is done
 }
 
@@ -227,5 +228,6 @@ func (fm *Manager) Remove(file FileToTrack) (RemoveResult, error) {
 		StagePaths:  []string{trackerFile},
 		RemovePaths: []string{target},
 		RestoreFn:   func() error { return fm.fs.Move(target, file.AbsPath, info) },
+		IsDir:       info.IsDir(),
 	}, nil
 }

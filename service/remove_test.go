@@ -102,6 +102,94 @@ func setupTrackedFile(t *testing.T, repoPath, home, scope, relativePath, content
 	return storagePath, livePath
 }
 
+// setupTrackedDir builds the on-disk state for a tracked directory without
+// going through Add. It creates the directory with files inside it in repo
+// storage, creates a symlink at the live path pointing to the storage dir,
+// writes the relative path into the tracker file, and commits everything.
+// Returns the storage path and live path.
+func setupTrackedDir(t *testing.T, repoPath, home, scope, relativePath string, files map[string]string) (storagePath, livePath string) {
+	t.Helper()
+
+	// Determine storage root from marker file, same logic as setupTrackedFile.
+	var storageRoot string
+	if scope == "" || scope == "common" {
+		marker, _ := os.ReadFile(filepath.Join(repoPath, ".lnkrepo"))
+		if strings.Contains(string(marker), "version=1") {
+			storageRoot = repoPath
+		} else if len(marker) == 0 {
+			if _, err := os.Stat(filepath.Join(repoPath, ".lnk")); err == nil {
+				storageRoot = repoPath
+			} else {
+				storageRoot = filepath.Join(repoPath, "common.lnk")
+			}
+		} else {
+			storageRoot = filepath.Join(repoPath, "common.lnk")
+		}
+	} else {
+		storageRoot = filepath.Join(repoPath, scope+".lnk")
+	}
+
+	storagePath = filepath.Join(storageRoot, relativePath)
+	livePath = filepath.Join(home, relativePath)
+
+	// Create directory and files in repo storage.
+	if err := os.MkdirAll(storagePath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range files {
+		testhelpers.MakeFile(t, filepath.Join(storagePath, name), content)
+	}
+
+	// Create symlink at live path pointing to storage directory.
+	if err := os.MkdirAll(filepath.Dir(livePath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	relTarget, err := filepath.Rel(filepath.Dir(livePath), storagePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(relTarget, livePath); err != nil {
+		t.Fatal(err)
+	}
+
+	// Determine tracker file name.
+	var trackerName string
+	if scope == "" || scope == "common" {
+		if storageRoot == repoPath {
+			trackerName = ".lnk"
+		} else {
+			trackerName = ".lnk.common"
+		}
+	} else {
+		trackerName = ".lnk." + scope
+	}
+
+	// Append relative path to tracker file.
+	trackerPath := filepath.Join(repoPath, trackerName)
+	existing, _ := os.ReadFile(trackerPath)
+	entries := strings.TrimSpace(string(existing))
+	if entries != "" {
+		entries += "\n"
+	}
+	entries += relativePath + "\n"
+	if err := os.WriteFile(trackerPath, []byte(entries), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Commit state to git.
+	commitCmds := [][]string{
+		{"git", "-C", repoPath, "add", "."},
+		{"git", "-C", repoPath, "commit", "-m", "lnk: added " + relativePath},
+	}
+	for _, c := range commitCmds {
+		if out, err := exec.Command(c[0], c[1:]...).CombinedOutput(); err != nil {
+			t.Fatalf("%v: %v\n%s", c, err, out)
+		}
+	}
+
+	return storagePath, livePath
+}
+
 // ---------- Remove tests ----------
 
 func TestRemove_CommonScope_EmptyHost(t *testing.T) {
@@ -509,4 +597,257 @@ func TestForget_HostScopedFile_WithCommonHost(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error forgetting host-scoped file with common host, got nil")
 	}
+}
+
+// ---------- Remove directory tests ----------
+
+func TestRemove_Directory_CommonScope(t *testing.T) {
+	svc, home := testhelpers.TestHome(t)
+	repoPath := svc.RepoPath()
+
+	files := map[string]string{
+		"init.lua":    "-- neovim config",
+		"plugins.lua": "-- plugins",
+	}
+	storagePath, livePath := setupTrackedDir(t, repoPath, home, "common", ".config/nvim", files)
+
+	if err := svc.Remove(context.Background(), "", livePath); err != nil {
+		t.Fatalf("Remove directory: %v", err)
+	}
+
+	// Live path should now be a regular directory, not a symlink.
+	info, err := os.Lstat(livePath)
+	if err != nil {
+		t.Fatalf("Lstat live path: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Error("expected live path to be a regular directory after remove, not a symlink")
+	}
+	if !info.IsDir() {
+		t.Error("expected live path to be a directory after remove")
+	}
+
+	// Files inside should be accessible.
+	for name, want := range files {
+		content, err := os.ReadFile(filepath.Join(livePath, name))
+		if err != nil {
+			t.Fatalf("ReadFile %s after remove: %v", name, err)
+		}
+		if string(content) != want {
+			t.Errorf("content of %s = %q, want %q", name, string(content), want)
+		}
+	}
+
+	// Storage path should no longer exist.
+	if testhelpers.FileExists(t, storagePath) {
+		t.Error("expected storage directory to be removed from repo")
+	}
+
+	// Tracker should no longer contain the entry.
+	testhelpers.AssertNotTracked(t, repoPath, ".config/nvim")
+}
+
+func TestRemove_Directory_HostScope(t *testing.T) {
+	svc, home := testhelpers.TestHome(t)
+	repoPath := svc.RepoPath()
+
+	files := map[string]string{"config": "# ssh config"}
+	storagePath, livePath := setupTrackedDir(t, repoPath, home, "testhost", ".ssh", files)
+
+	if err := svc.Remove(context.Background(), "testhost", livePath); err != nil {
+		t.Fatalf("Remove directory host scope: %v", err)
+	}
+
+	info, err := os.Lstat(livePath)
+	if err != nil {
+		t.Fatalf("Lstat: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Error("expected regular directory after remove")
+	}
+	if testhelpers.FileExists(t, storagePath) {
+		t.Error("expected storage directory removed")
+	}
+	testhelpers.AssertNotTrackedInScope(t, repoPath, "testhost", ".ssh")
+}
+
+func TestRemove_Directory_ContentIntactAfterRemove(t *testing.T) {
+	svc, home := testhelpers.TestHome(t)
+	repoPath := svc.RepoPath()
+
+	files := map[string]string{
+		"init.lua":         "-- neovim config",
+		"subdir/extra.lua": "-- extra",
+	}
+	_, livePath := setupTrackedDir(t, repoPath, home, "common", ".config/nvim", files)
+
+	if err := svc.Remove(context.Background(), "", livePath); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+
+	// All nested content should be restored at live path.
+	for name, want := range files {
+		p := filepath.Join(livePath, name)
+		content, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatalf("ReadFile %s: %v", name, err)
+		}
+		if string(content) != want {
+			t.Errorf("%s = %q, want %q", name, string(content), want)
+		}
+	}
+}
+
+func TestRemove_Directory_CommitCreated(t *testing.T) {
+	svc, home := testhelpers.TestHome(t)
+	repoPath := svc.RepoPath()
+
+	_, livePath := setupTrackedDir(t, repoPath, home, "common", ".config/nvim",
+		map[string]string{"init.lua": "-- config"})
+
+	commitsBefore := testhelpers.GitLog(t, repoPath)
+
+	if err := svc.Remove(context.Background(), "", livePath); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+
+	commitsAfter := testhelpers.GitLog(t, repoPath)
+	if len(commitsAfter) != len(commitsBefore)+1 {
+		t.Errorf("expected 1 new commit after remove, before=%d after=%d",
+			len(commitsBefore), len(commitsAfter))
+	}
+}
+
+func TestRemove_Directory_V1_CommonScope(t *testing.T) {
+	svc, home := testhelpers.TestHomeV1(t)
+	repoPath := svc.RepoPath()
+
+	files := map[string]string{"init.lua": "-- config"}
+	storagePath, livePath := setupTrackedDir(t, repoPath, home, "common", ".config/nvim", files)
+
+	if err := svc.Remove(context.Background(), "", livePath); err != nil {
+		t.Fatalf("Remove v1 directory: %v", err)
+	}
+
+	info, err := os.Lstat(livePath)
+	if err != nil {
+		t.Fatalf("Lstat: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Error("expected regular directory after v1 remove")
+	}
+	if testhelpers.FileExists(t, storagePath) {
+		t.Error("expected storage directory removed")
+	}
+	testhelpers.AssertNotTracked(t, repoPath, ".config/nvim")
+}
+
+func TestRemove_Directory_V1Legacy_CommonScope(t *testing.T) {
+	svc, home := testhelpers.TestHomeV1Legacy(t)
+	repoPath := svc.RepoPath()
+
+	files := map[string]string{"init.lua": "-- config"}
+	storagePath, livePath := setupTrackedDir(t, repoPath, home, "common", ".config/nvim", files)
+
+	if err := svc.Remove(context.Background(), "", livePath); err != nil {
+		t.Fatalf("Remove v1 legacy directory: %v", err)
+	}
+
+	info, err := os.Lstat(livePath)
+	if err != nil {
+		t.Fatalf("Lstat: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Error("expected regular directory after v1 legacy remove")
+	}
+	if testhelpers.FileExists(t, storagePath) {
+		t.Error("expected storage directory removed")
+	}
+	testhelpers.AssertNotTracked(t, repoPath, ".config/nvim")
+}
+
+// ---------- Forget directory tests ----------
+
+func TestForget_Directory_CommonScope(t *testing.T) {
+	svc, home := testhelpers.TestHome(t)
+	repoPath := svc.RepoPath()
+
+	files := map[string]string{"init.lua": "-- config"}
+	storagePath, livePath := setupTrackedDir(t, repoPath, home, "common", ".config/nvim", files)
+
+	if err := svc.Forget(context.Background(), "", livePath); err != nil {
+		t.Fatalf("Forget directory: %v", err)
+	}
+
+	// Live symlink should be gone.
+	if testhelpers.FileExists(t, livePath) {
+		t.Error("expected live symlink removed after forget")
+	}
+
+	// Storage directory should remain.
+	if !testhelpers.FileExists(t, storagePath) {
+		t.Error("expected storage directory to remain after forget")
+	}
+
+	testhelpers.AssertNotTracked(t, repoPath, ".config/nvim")
+}
+
+func TestForget_Directory_HostScope(t *testing.T) {
+	svc, home := testhelpers.TestHome(t)
+	repoPath := svc.RepoPath()
+
+	files := map[string]string{"config": "# ssh"}
+	storagePath, livePath := setupTrackedDir(t, repoPath, home, "testhost", ".ssh", files)
+
+	if err := svc.Forget(context.Background(), "testhost", livePath); err != nil {
+		t.Fatalf("Forget directory host scope: %v", err)
+	}
+
+	if testhelpers.FileExists(t, livePath) {
+		t.Error("expected live symlink removed")
+	}
+	if !testhelpers.FileExists(t, storagePath) {
+		t.Error("expected storage directory to remain")
+	}
+	testhelpers.AssertNotTrackedInScope(t, repoPath, "testhost", ".ssh")
+}
+
+func TestForget_Directory_V1_CommonScope(t *testing.T) {
+	svc, home := testhelpers.TestHomeV1(t)
+	repoPath := svc.RepoPath()
+
+	files := map[string]string{"init.lua": "-- config"}
+	storagePath, livePath := setupTrackedDir(t, repoPath, home, "common", ".config/nvim", files)
+
+	if err := svc.Forget(context.Background(), "", livePath); err != nil {
+		t.Fatalf("Forget v1 directory: %v", err)
+	}
+
+	if testhelpers.FileExists(t, livePath) {
+		t.Error("expected live symlink removed")
+	}
+	if !testhelpers.FileExists(t, storagePath) {
+		t.Error("expected storage directory to remain")
+	}
+	testhelpers.AssertNotTracked(t, repoPath, ".config/nvim")
+}
+
+func TestForget_Directory_V1Legacy_CommonScope(t *testing.T) {
+	svc, home := testhelpers.TestHomeV1Legacy(t)
+	repoPath := svc.RepoPath()
+
+	files := map[string]string{"init.lua": "-- config"}
+	storagePath, livePath := setupTrackedDir(t, repoPath, home, "common", ".config/nvim", files)
+
+	if err := svc.Forget(context.Background(), "", livePath); err != nil {
+		t.Fatalf("Forget v1 legacy directory: %v", err)
+	}
+
+	if testhelpers.FileExists(t, livePath) {
+		t.Error("expected live symlink removed")
+	}
+	if !testhelpers.FileExists(t, storagePath) {
+		t.Error("expected storage directory to remain")
+	}
+	testhelpers.AssertNotTracked(t, repoPath, ".config/nvim")
 }
