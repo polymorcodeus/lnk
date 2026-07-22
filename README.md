@@ -1,6 +1,12 @@
+<p align="center">
+  <source media="(prefers-color-scheme: dark)" srcset="images/lnk-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="images/lnk-light.png">
+  <img alt="Project Logo" src="images/lnk-dark.png" width="128">
+</p>
+
 # lnk
 
-[![Go Version](https://img.shields.io/github/go-mod/go-version/polymorcodeus/lnk)](https://go.dev/) [![License](https://img.shields.io/github/license/polymorcodeus/lnk)](./LICENSE) [![Build Status](https://img.shields.io/github/actions/workflow/status/polymorcodeus/lnk/ci.yml?branch=main)](https://github.com/polymorcodeus/lnk/actions)[![Go Report Card](https://goreportcard.com/badge/github.com/polymorcodeus/lnk)](https://goreportcard.com/report/github.com/polymorcodeus/lnk)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/polymorcodeus/lnk)](https://go.dev/) [![License](https://img.shields.io/github/license/polymorcodeus/lnk)](./LICENSE) [![Build Status](https://img.shields.io/github/actions/workflow/status/polymorcodeus/lnk/ci.yml?branch=main)](https://github.com/polymorcodeus/lnk/actions)
 
 **Lightweight git-native dotfiles management.**
 
