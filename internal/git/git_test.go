@@ -31,7 +31,6 @@ func configureGit(t *testing.T, g *git.Git) {
 	}
 }
 
-// newBareRemote creates a bare git repo to act as a remote.
 func newBareRemote(t *testing.T) string {
 	t.Helper()
 	remote := t.TempDir()
@@ -41,7 +40,6 @@ func newBareRemote(t *testing.T) string {
 	return remote
 }
 
-// pushToRemote sets up a source repo, commits, and pushes to remote.
 func pushToRemote(t *testing.T, remote string) string {
 	t.Helper()
 	src := t.TempDir()
@@ -74,7 +72,10 @@ func pushToRemote(t *testing.T, remote string) string {
 // ---------- tests ----------
 
 func TestGit_Init(t *testing.T) {
-	t.Run("initializes git repository", func(t *testing.T) {
+	t.Parallel()
+
+	t.Run("initializes_git_repository", func(t *testing.T) {
+		t.Parallel()
 		tmp := t.TempDir()
 		g := git.New(tmp)
 
@@ -93,7 +94,10 @@ func TestGit_Init(t *testing.T) {
 }
 
 func TestGit_EnsureGitConfigOnce(t *testing.T) {
-	t.Run("configures git user", func(t *testing.T) {
+	t.Parallel()
+
+	t.Run("configures_git_user", func(t *testing.T) {
+		t.Parallel()
 		tmp := t.TempDir()
 		g := initRepo(t, tmp)
 		configured := false
@@ -116,38 +120,64 @@ func TestGit_EnsureGitConfigOnce(t *testing.T) {
 }
 
 func TestGit_Commit(t *testing.T) {
-	t.Run("commits staged changes", func(t *testing.T) {
-		tmp := t.TempDir()
-		g := initRepo(t, tmp)
-		configureGit(t, g)
+	t.Parallel()
 
-		os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0644)
-		if err := g.AddAll(); err != nil {
-			t.Fatal(err)
-		}
+	tests := []struct {
+		name    string
+		setup   func(t *testing.T, tmp string, g *git.Git)
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name: "commits_staged_changes",
+			setup: func(t *testing.T, tmp string, g *git.Git) {
+				configureGit(t, g)
+				os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0644)
+				if err := g.AddAll(); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantErr: false,
+		},
+		{
+			name: "fails_without_staged_changes",
+			setup: func(t *testing.T, tmp string, g *git.Git) {
+				configureGit(t, g)
+			},
+			wantErr: true,
+			errMsg:  "git operation failed",
+		},
+	}
 
-		if err := g.Commit("initial"); err != nil {
-			t.Fatal(err)
-		}
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			tmp := t.TempDir()
+			g := initRepo(t, tmp)
+			tt.setup(t, tmp, g)
 
-	t.Run("fails without staged changes", func(t *testing.T) {
-		tmp := t.TempDir()
-		g := initRepo(t, tmp)
-		configureGit(t, g)
-
-		err := g.Commit("empty")
-		if err == nil {
-			t.Fatal("expected error")
-		}
-		if !strings.Contains(err.Error(), "git operation failed") {
-			t.Errorf("unexpected error: %v", err)
-		}
-	})
+			err := g.Commit("test commit")
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				if !strings.Contains(err.Error(), tt.errMsg) {
+					t.Errorf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
 }
 
 func TestGit_HasChanges(t *testing.T) {
-	t.Run("detects dirty and clean states", func(t *testing.T) {
+	t.Parallel()
+
+	t.Run("detects_dirty_and_clean_states", func(t *testing.T) {
+		t.Parallel()
 		tmp := t.TempDir()
 		g := initRepo(t, tmp)
 
@@ -172,7 +202,10 @@ func TestGit_HasChanges(t *testing.T) {
 }
 
 func TestGit_Diff(t *testing.T) {
-	t.Run("returns diff for uncommitted changes", func(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns_diff_for_uncommitted_changes", func(t *testing.T) {
+		t.Parallel()
 		tmp := t.TempDir()
 		g := initRepo(t, tmp)
 		configureGit(t, g)
@@ -200,7 +233,10 @@ func TestGit_Diff(t *testing.T) {
 }
 
 func TestGit_AddAll(t *testing.T) {
-	t.Run("stages new files", func(t *testing.T) {
+	t.Parallel()
+
+	t.Run("stages_new_files", func(t *testing.T) {
+		t.Parallel()
 		tmp := t.TempDir()
 		g := initRepo(t, tmp)
 
@@ -222,272 +258,400 @@ func TestGit_AddAll(t *testing.T) {
 }
 
 func TestGit_GetStatus(t *testing.T) {
-	t.Run("local-only status without remote", func(t *testing.T) {
-		tmp := t.TempDir()
-		g := initRepo(t, tmp)
-		configureGit(t, g)
+	t.Parallel()
 
-		// Create a commit so we have local history
-		os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0644)
-		if err := g.AddAll(); err != nil {
-			t.Fatal(err)
-		}
-		if err := g.Commit("initial"); err != nil {
-			t.Fatal(err)
-		}
+	tests := []struct {
+		name       string
+		setup      func(t *testing.T) (g *git.Git, cleanup func())
+		wantAhead  int
+		wantBehind int
+		wantRemote string
+		wantDirty  bool
+	}{
+		{
+			name: "local_only_status_without_remote",
+			setup: func(t *testing.T) (*git.Git, func()) {
+				tmp := t.TempDir()
+				g := initRepo(t, tmp)
+				configureGit(t, g)
+				os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0644)
+				if err := g.AddAll(); err != nil {
+					t.Fatal(err)
+				}
+				if err := g.Commit("initial"); err != nil {
+					t.Fatal(err)
+				}
+				return g, func() {}
+			},
+			wantAhead:  1,
+			wantBehind: 0,
+			wantRemote: "",
+			wantDirty:  false,
+		},
+		{
+			name: "dirty_working_tree",
+			setup: func(t *testing.T) (*git.Git, func()) {
+				tmp := t.TempDir()
+				g := initRepo(t, tmp)
+				os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0644)
+				return g, func() {}
+			},
+			wantAhead:  0,
+			wantBehind: 0,
+			wantRemote: "",
+			wantDirty:  true,
+		},
+		{
+			name: "status_with_remote",
+			setup: func(t *testing.T) (*git.Git, func()) {
+				remote := newBareRemote(t)
+				_ = pushToRemote(t, remote)
 
-		status, err := g.GetStatus()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if status.Ahead != 1 {
-			t.Errorf("expected Ahead=1, got %d", status.Ahead)
-		}
-		if status.Behind != 0 {
-			t.Errorf("expected Behind=0, got %d", status.Behind)
-		}
-		if status.Remote != "" {
-			t.Errorf("expected no remote, got %q", status.Remote)
-		}
-		if status.Dirty {
-			t.Error("expected clean working tree")
-		}
-	})
+				dst := filepath.Join(t.TempDir(), "clone")
+				g := git.New(dst)
+				if err := g.Clone(remote); err != nil {
+					t.Fatalf("Clone: %v", err)
+				}
+				return g, func() {}
+			},
+			wantAhead:  0,
+			wantBehind: 0,
+			wantRemote: "origin/main",
+			wantDirty:  false,
+		},
+	}
 
-	t.Run("dirty working tree", func(t *testing.T) {
-		tmp := t.TempDir()
-		g := initRepo(t, tmp)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			g, cleanup := tt.setup(t)
+			defer cleanup()
 
-		os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0644)
-
-		status, err := g.GetStatus()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !status.Dirty {
-			t.Error("expected dirty working tree")
-		}
-	})
-
-	t.Run("status with remote", func(t *testing.T) {
-		remote := newBareRemote(t)
-		_ = pushToRemote(t, remote)
-
-		// Clone and check status
-		dst := filepath.Join(t.TempDir(), "clone")
-		g := git.New(dst)
-		if err := g.Clone(remote); err != nil {
-			t.Fatalf("Clone: %v", err)
-		}
-
-		status, err := g.GetStatus()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if status.Ahead != 0 {
-			t.Errorf("expected Ahead=0 after clone, got %d", status.Ahead)
-		}
-		if status.Behind != 0 {
-			t.Errorf("expected Behind=0 after clone, got %d", status.Behind)
-		}
-		if status.Dirty {
-			t.Error("expected clean working tree after clone")
-		}
-	})
+			status, err := g.GetStatus()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if status.Ahead != tt.wantAhead {
+				t.Errorf("expected Ahead=%d, got %d", tt.wantAhead, status.Ahead)
+			}
+			if status.Behind != tt.wantBehind {
+				t.Errorf("expected Behind=%d, got %d", tt.wantBehind, status.Behind)
+			}
+			if status.Remote != tt.wantRemote {
+				t.Errorf("expected Remote=%q, got %q", tt.wantRemote, status.Remote)
+			}
+			if status.Dirty != tt.wantDirty {
+				t.Errorf("expected Dirty=%v, got %v", tt.wantDirty, status.Dirty)
+			}
+		})
+	}
 }
 
 func TestGit_Push(t *testing.T) {
-	t.Run("fails without remote", func(t *testing.T) {
-		tmp := t.TempDir()
-		g := initRepo(t, tmp)
+	t.Parallel()
 
-		err := g.Push()
-		if err == nil {
-			t.Fatal("expected error")
-		}
-		if !errors.Is(err, git.ErrPush) {
-			t.Errorf("expected ErrPush, got %v", err)
-		}
-	})
+	tests := []struct {
+		name    string
+		setup   func(t *testing.T) (g *git.Git, remote string)
+		wantErr error
+	}{
+		{
+			name: "fails_without_remote",
+			setup: func(t *testing.T) (*git.Git, string) {
+				tmp := t.TempDir()
+				return initRepo(t, tmp), ""
+			},
+			wantErr: git.ErrPush,
+		},
+		{
+			name: "pushes_to_remote",
+			setup: func(t *testing.T) (*git.Git, string) {
+				remote := newBareRemote(t)
+				src := pushToRemote(t, remote)
 
-	t.Run("pushes to remote", func(t *testing.T) {
-		remote := newBareRemote(t)
-		src := pushToRemote(t, remote)
+				// Add another commit and push
+				g := git.New(src)
+				configureGit(t, g)
+				os.WriteFile(filepath.Join(src, "file2.txt"), []byte("world"), 0644)
+				if err := g.AddAll(); err != nil {
+					t.Fatal(err)
+				}
+				if err := g.Commit("second"); err != nil {
+					t.Fatal(err)
+				}
+				return g, remote
+			},
+			wantErr: nil,
+		},
+	}
 
-		// Add another commit and push
-		g := git.New(src)
-		configureGit(t, g)
-		os.WriteFile(filepath.Join(src, "file2.txt"), []byte("world"), 0644)
-		if err := g.AddAll(); err != nil {
-			t.Fatal(err)
-		}
-		if err := g.Commit("second"); err != nil {
-			t.Fatal(err)
-		}
-
-		if err := g.Push(); err != nil {
-			t.Fatalf("Push: %v", err)
-		}
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			g, _ := tt.setup(t)
+			err := g.Push()
+			if tt.wantErr != nil {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				if !errors.Is(err, tt.wantErr) {
+					t.Errorf("expected %v, got %v", tt.wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Push: %v", err)
+			}
+		})
+	}
 }
 
 func TestGit_Pull(t *testing.T) {
-	t.Run("fails without remote", func(t *testing.T) {
-		tmp := t.TempDir()
-		g := initRepo(t, tmp)
+	t.Parallel()
 
-		err := g.Pull()
-		if err == nil {
-			t.Fatal("expected error")
-		}
-		if !errors.Is(err, git.ErrPull) {
-			t.Errorf("expected ErrPull, got %v", err)
-		}
-	})
+	tests := []struct {
+		name    string
+		setup   func(t *testing.T) (g *git.Git, remote string)
+		wantErr error
+	}{
+		{
+			name: "fails_without_remote",
+			setup: func(t *testing.T) (*git.Git, string) {
+				tmp := t.TempDir()
+				return initRepo(t, tmp), ""
+			},
+			wantErr: git.ErrPull,
+		},
+		{
+			name: "pulls_from_remote",
+			setup: func(t *testing.T) (*git.Git, string) {
+				remote := newBareRemote(t)
+				src := pushToRemote(t, remote)
 
-	t.Run("pulls from remote", func(t *testing.T) {
-		remote := newBareRemote(t)
-		src := pushToRemote(t, remote)
+				// Clone into dst
+				dst := filepath.Join(t.TempDir(), "clone")
+				g := git.New(dst)
+				if err := g.Clone(remote); err != nil {
+					t.Fatalf("Clone: %v", err)
+				}
 
-		// Clone into dst
-		dst := filepath.Join(t.TempDir(), "clone")
-		g := git.New(dst)
-		if err := g.Clone(remote); err != nil {
-			t.Fatalf("Clone: %v", err)
-		}
+				// Add commit to source and push
+				gSrc := git.New(src)
+				configureGit(t, gSrc)
+				os.WriteFile(filepath.Join(src, "pulled.txt"), []byte("new"), 0644)
+				if err := gSrc.AddAll(); err != nil {
+					t.Fatal(err)
+				}
+				if err := gSrc.Commit("add pulled"); err != nil {
+					t.Fatal(err)
+				}
+				if err := gSrc.Push(); err != nil {
+					t.Fatal(err)
+				}
 
-		// Add commit to source and push
-		gSrc := git.New(src)
-		configureGit(t, gSrc)
-		os.WriteFile(filepath.Join(src, "pulled.txt"), []byte("new"), 0644)
-		if err := gSrc.AddAll(); err != nil {
-			t.Fatal(err)
-		}
-		if err := gSrc.Commit("add pulled"); err != nil {
-			t.Fatal(err)
-		}
-		if err := gSrc.Push(); err != nil {
-			t.Fatal(err)
-		}
+				return g, remote
+			},
+			wantErr: nil,
+		},
+	}
 
-		// Pull in clone
-		if err := g.Pull(); err != nil {
-			t.Fatalf("Pull: %v", err)
-		}
-
-		if _, err := os.Stat(filepath.Join(dst, "pulled.txt")); err != nil {
-			t.Errorf("expected pulled file to exist: %v", err)
-		}
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			g, _ := tt.setup(t)
+			err := g.Pull()
+			if tt.wantErr != nil {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				if !errors.Is(err, tt.wantErr) {
+					t.Errorf("expected %v, got %v", tt.wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Pull: %v", err)
+			}
+		})
+	}
 }
 
 func TestGit_Clone(t *testing.T) {
-	t.Run("clones from bare remote", func(t *testing.T) {
-		remote := newBareRemote(t)
-		pushToRemote(t, remote)
+	t.Parallel()
 
-		dst := filepath.Join(t.TempDir(), "clone")
-		g := git.New(dst)
+	tests := []struct {
+		name  string
+		setup func(t *testing.T) (remote, dst string)
+	}{
+		{
+			name: "clones_from_bare_remote",
+			setup: func(t *testing.T) (string, string) {
+				remote := newBareRemote(t)
+				_ = pushToRemote(t, remote)
+				dst := filepath.Join(t.TempDir(), "clone")
+				return remote, dst
+			},
+		},
+		{
+			name: "overwrites_existing_directory",
+			setup: func(t *testing.T) (string, string) {
+				remote := newBareRemote(t)
+				_ = pushToRemote(t, remote)
+				dst := filepath.Join(t.TempDir(), "clone")
+				os.MkdirAll(dst, 0755)
+				os.WriteFile(filepath.Join(dst, "old.txt"), []byte("old"), 0644)
+				return remote, dst
+			},
+		},
+	}
 
-		if err := g.Clone(remote); err != nil {
-			t.Fatalf("Clone: %v", err)
-		}
-
-		if !g.IsGitRepository() {
-			t.Error("expected cloned directory to be a git repo")
-		}
-		if _, err := os.Stat(filepath.Join(dst, "file.txt")); err != nil {
-			t.Errorf("expected file.txt in clone: %v", err)
-		}
-	})
-
-	t.Run("overwrites existing directory", func(t *testing.T) {
-		remote := newBareRemote(t)
-		pushToRemote(t, remote)
-
-		dst := filepath.Join(t.TempDir(), "clone")
-		os.MkdirAll(dst, 0755)
-		os.WriteFile(filepath.Join(dst, "old.txt"), []byte("old"), 0644)
-
-		g := git.New(dst)
-		if err := g.Clone(remote); err != nil {
-			t.Fatalf("Clone: %v", err)
-		}
-
-		if _, err := os.Stat(filepath.Join(dst, "old.txt")); !os.IsNotExist(err) {
-			t.Error("expected old file to be removed")
-		}
-		if _, err := os.Stat(filepath.Join(dst, "file.txt")); err != nil {
-			t.Errorf("expected file.txt in clone: %v", err)
-		}
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			remote, dst := tt.setup(t)
+			g := git.New(dst)
+			if err := g.Clone(remote); err != nil {
+				t.Fatalf("Clone: %v", err)
+			}
+			if !g.IsGitRepository() {
+				t.Error("expected cloned directory to be a git repo")
+			}
+			if _, err := os.Stat(filepath.Join(dst, "file.txt")); err != nil {
+				t.Errorf("expected file.txt in clone: %v", err)
+			}
+			if tt.name == "overwrites_existing_directory" {
+				if _, err := os.Stat(filepath.Join(dst, "old.txt")); !os.IsNotExist(err) {
+					t.Error("expected old file to be removed")
+				}
+			}
+		})
+	}
 }
 
 func TestGit_Stage(t *testing.T) {
-	t.Run("stages existing file", func(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		setup     func(t *testing.T, tmp string, g *git.Git)
+		wantDirty bool
+	}{
+		{
+			name: "stages_existing_file",
+			setup: func(t *testing.T, tmp string, g *git.Git) {
+				configureGit(t, g)
+				os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0644)
+				if err := g.Stage("file.txt"); err != nil {
+					t.Fatalf("Stage: %v", err)
+				}
+			},
+			wantDirty: true,
+		},
+		{
+			name: "stages_deletion_of_removed_file",
+			setup: func(t *testing.T, tmp string, g *git.Git) {
+				configureGit(t, g)
+				os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0644)
+				if err := g.AddAll(); err != nil {
+					t.Fatal(err)
+				}
+				if err := g.Commit("initial"); err != nil {
+					t.Fatal(err)
+				}
+				os.Remove(filepath.Join(tmp, "file.txt"))
+				if err := g.Stage("file.txt"); err != nil {
+					t.Fatalf("Stage: %v", err)
+				}
+			},
+			wantDirty: true,
+		},
+		{
+			name: "ignores_untracked_missing_file",
+			setup: func(t *testing.T, tmp string, g *git.Git) {
+				if err := g.Stage("nonexistent.txt"); err != nil {
+					t.Fatalf("Stage: %v", err)
+				}
+			},
+			wantDirty: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			tmp := t.TempDir()
+			g := initRepo(t, tmp)
+			tt.setup(t, tmp, g)
+
+			dirty, err := g.HasChanges()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if dirty != tt.wantDirty {
+				t.Errorf("expected dirty=%v, got %v", tt.wantDirty, dirty)
+			}
+		})
+	}
+}
+
+func TestGit_Options(t *testing.T) {
+	t.Parallel()
+
+	t.Run("WithColor_adds_color_flag", func(t *testing.T) {
+		t.Parallel()
 		tmp := t.TempDir()
-		g := initRepo(t, tmp)
-		configureGit(t, g)
-
-		os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0644)
-
-		if err := g.Stage("file.txt"); err != nil {
-			t.Fatalf("Stage: %v", err)
-		}
-
-		dirty, err := g.HasChanges()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !dirty {
-			t.Error("expected staged changes")
-		}
+		g := git.New(tmp, git.WithColor())
+		_ = g.Init()
 	})
 
-	t.Run("stages deletion of removed file", func(t *testing.T) {
+	t.Run("WithLongTimeout_uses_long_timeout", func(t *testing.T) {
+		t.Parallel()
 		tmp := t.TempDir()
-		g := initRepo(t, tmp)
-		configureGit(t, g)
-
-		// Create, commit, then delete
-		os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0644)
-		if err := g.AddAll(); err != nil {
-			t.Fatal(err)
-		}
-		if err := g.Commit("initial"); err != nil {
-			t.Fatal(err)
-		}
-
-		os.Remove(filepath.Join(tmp, "file.txt"))
-
-		if err := g.Stage("file.txt"); err != nil {
-			t.Fatalf("Stage: %v", err)
-		}
-
-		dirty, err := g.HasChanges()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !dirty {
-			t.Error("expected deletion to be staged")
-		}
+		g := git.New(tmp, git.WithLongTimeout())
+		_ = g.Init()
 	})
+}
 
-	t.Run("ignores untracked missing file", func(t *testing.T) {
-		tmp := t.TempDir()
-		g := initRepo(t, tmp)
+func TestGit_HasStagedChanges(t *testing.T) {
+	t.Parallel()
 
-		// File never existed and was never tracked
-		if err := g.Stage("nonexistent.txt"); err != nil {
-			t.Fatalf("Stage: %v", err)
-		}
+	tests := []struct {
+		name       string
+		setup      func(t *testing.T, tmp string, g *git.Git)
+		wantStaged bool
+	}{
+		{
+			name: "detects_staged_changes",
+			setup: func(t *testing.T, tmp string, g *git.Git) {
+				configureGit(t, g)
+				os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0644)
+				_ = g.AddAll()
+			},
+			wantStaged: true,
+		},
+		{
+			name: "no_staged_changes",
+			setup: func(t *testing.T, tmp string, g *git.Git) {
+				configureGit(t, g)
+			},
+			wantStaged: false,
+		},
+	}
 
-		dirty, err := g.HasChanges()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if dirty {
-			t.Error("expected no changes when staging untracked missing file")
-		}
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			tmp := t.TempDir()
+			g := initRepo(t, tmp)
+			tt.setup(t, tmp, g)
+
+			staged, err := g.HasStagedChanges()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if staged != tt.wantStaged {
+				t.Errorf("expected staged=%v, got %v", tt.wantStaged, staged)
+			}
+		})
+	}
 }

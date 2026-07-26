@@ -12,142 +12,178 @@ import (
 )
 
 func TestFileSystem_ValidateFileInfoForAdd(t *testing.T) {
+	t.Parallel()
+
 	fsys := fs.New()
 
-	t.Run("file not found", func(t *testing.T) {
-		_, err := fsys.ValidateFileInfoForAdd("/nonexistent/path")
-		if err == nil {
-			t.Fatal("expected error")
-		}
-		if !errors.Is(err, fs.ErrFileNotExists) {
-			t.Errorf("expected ErrFileNotExists, got %v", err)
-		}
-	})
+	tests := []struct {
+		name    string
+		setup   func(t *testing.T) string
+		wantErr error
+		isDir   bool
+	}{
+		{
+			name: "file_not_found",
+			setup: func(t *testing.T) string {
+				return "/nonexistent/path"
+			},
+			wantErr: fs.ErrFileNotExists,
+		},
+		{
+			name: "regular_file",
+			setup: func(t *testing.T) string {
+				tmp := t.TempDir()
+				path := filepath.Join(tmp, "file.txt")
+				os.WriteFile(path, []byte("hello"), 0644)
+				return path
+			},
+			wantErr: nil,
+		},
+		{
+			name: "directory",
+			setup: func(t *testing.T) string {
+				return t.TempDir()
+			},
+			wantErr: nil,
+			isDir:   true,
+		},
+		{
+			name: "symlink_rejected",
+			setup: func(t *testing.T) string {
+				tmp := t.TempDir()
+				target := filepath.Join(tmp, "target")
+				link := filepath.Join(tmp, "link")
+				os.WriteFile(target, []byte("x"), 0644)
+				os.Symlink(target, link)
+				return link
+			},
+			wantErr: fs.ErrUnsupportedType,
+		},
+	}
 
-	t.Run("regular file", func(t *testing.T) {
-		tmp := t.TempDir()
-		path := filepath.Join(tmp, "file.txt")
-		os.WriteFile(path, []byte("hello"), 0644)
-
-		info, err := fsys.ValidateFileInfoForAdd(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if info.Name() != "file.txt" {
-			t.Errorf("unexpected name: %s", info.Name())
-		}
-	})
-
-	t.Run("directory", func(t *testing.T) {
-		tmp := t.TempDir()
-
-		info, err := fsys.ValidateFileInfoForAdd(tmp)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !info.IsDir() {
-			t.Error("expected directory")
-		}
-	})
-
-	t.Run("symlink rejected", func(t *testing.T) {
-		tmp := t.TempDir()
-		target := filepath.Join(tmp, "target")
-		link := filepath.Join(tmp, "link")
-		os.WriteFile(target, []byte("x"), 0644)
-		os.Symlink(target, link)
-
-		_, err := fsys.ValidateFileInfoForAdd(link)
-		if err == nil {
-			t.Fatal("expected error for symlink")
-		}
-		if !errors.Is(err, fs.ErrUnsupportedType) {
-			t.Errorf("expected ErrUnsupportedType, got %v", err)
-		}
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			path := tt.setup(t)
+			info, err := fsys.ValidateFileInfoForAdd(path)
+			if tt.wantErr != nil {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				if !errors.Is(err, tt.wantErr) {
+					t.Errorf("expected %v, got %v", tt.wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tt.isDir && !info.IsDir() {
+				t.Error("expected directory")
+			}
+		})
+	}
 }
 
 func TestFileSystem_ValidateSymlinkForRemove(t *testing.T) {
+	t.Parallel()
+
 	fsys := fs.New()
 
-	t.Run("not a symlink", func(t *testing.T) {
-		tmp := t.TempDir()
-		path := filepath.Join(tmp, "file.txt")
-		os.WriteFile(path, []byte("x"), 0644)
+	tests := []struct {
+		name    string
+		setup   func(t *testing.T) (path, repo string)
+		wantErr error
+	}{
+		{
+			name: "not_a_symlink",
+			setup: func(t *testing.T) (string, string) {
+				tmp := t.TempDir()
+				path := filepath.Join(tmp, "file.txt")
+				os.WriteFile(path, []byte("x"), 0644)
+				return path, tmp
+			},
+			wantErr: lnkerror.ErrNotManaged,
+		},
+		{
+			name: "nonexistent_path",
+			setup: func(t *testing.T) (string, string) {
+				return "/nonexistent", "/repo"
+			},
+			wantErr: fs.ErrFileNotExists,
+		},
+		{
+			name: "symlink_outside_repo",
+			setup: func(t *testing.T) (string, string) {
+				tmp := t.TempDir()
+				repo := filepath.Join(tmp, "repo")
+				os.MkdirAll(repo, 0755)
+				outside := filepath.Join(tmp, "outside")
+				link := filepath.Join(tmp, "link")
+				os.WriteFile(outside, []byte("x"), 0644)
+				os.Symlink(outside, link)
+				return link, repo
+			},
+			wantErr: lnkerror.ErrNotManaged,
+		},
+		{
+			name: "symlink_inside_repo",
+			setup: func(t *testing.T) (string, string) {
+				tmp := t.TempDir()
+				repo := filepath.Join(tmp, "repo")
+				storage := filepath.Join(repo, "storage")
+				os.MkdirAll(storage, 0755)
+				target := filepath.Join(storage, "file.txt")
+				link := filepath.Join(tmp, "link")
+				os.WriteFile(target, []byte("x"), 0644)
+				os.Symlink(target, link)
+				return link, repo
+			},
+			wantErr: nil,
+		},
+		{
+			name: "relative_symlink_inside_repo",
+			setup: func(t *testing.T) (string, string) {
+				tmp := t.TempDir()
+				repo := filepath.Join(tmp, "repo")
+				storage := filepath.Join(repo, "storage")
+				os.MkdirAll(storage, 0755)
+				target := filepath.Join(storage, "file.txt")
+				link := filepath.Join(repo, "link.txt")
+				os.WriteFile(target, []byte("x"), 0644)
+				rel, _ := filepath.Rel(repo, target)
+				os.Symlink(rel, link)
+				return link, repo
+			},
+			wantErr: nil,
+		},
+	}
 
-		err := fsys.ValidateSymlinkForRemove(path, tmp)
-		if !errors.Is(err, lnkerror.ErrNotManaged) {
-			t.Fatalf("expected ErrNotManaged, got %v", err)
-		}
-	})
-
-	t.Run("nonexistent path", func(t *testing.T) {
-		err := fsys.ValidateSymlinkForRemove("/nonexistent", "/repo")
-		if err == nil {
-			t.Fatal("expected error")
-		}
-		if !errors.Is(err, fs.ErrFileNotExists) {
-			t.Errorf("expected ErrFileNotExists, got %v", err)
-		}
-	})
-
-	t.Run("symlink outside repo", func(t *testing.T) {
-		tmp := t.TempDir()
-		repo := filepath.Join(tmp, "repo")
-		os.MkdirAll(repo, 0755)
-
-		outside := filepath.Join(tmp, "outside")
-		link := filepath.Join(tmp, "link")
-		os.WriteFile(outside, []byte("x"), 0644)
-		os.Symlink(outside, link)
-
-		err := fsys.ValidateSymlinkForRemove(link, repo)
-		if !errors.Is(err, lnkerror.ErrNotManaged) {
-			t.Fatalf("expected ErrNotManaged, got %v", err)
-		}
-	})
-
-	t.Run("symlink inside repo", func(t *testing.T) {
-		tmp := t.TempDir()
-		repo := filepath.Join(tmp, "repo")
-		storage := filepath.Join(repo, "storage")
-		os.MkdirAll(storage, 0755)
-
-		target := filepath.Join(storage, "file.txt")
-		link := filepath.Join(tmp, "link")
-		os.WriteFile(target, []byte("x"), 0644)
-		os.Symlink(target, link)
-
-		err := fsys.ValidateSymlinkForRemove(link, repo)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-
-	t.Run("relative symlink inside repo", func(t *testing.T) {
-		tmp := t.TempDir()
-		repo := filepath.Join(tmp, "repo")
-		storage := filepath.Join(repo, "storage")
-		os.MkdirAll(storage, 0755)
-
-		target := filepath.Join(storage, "file.txt")
-		link := filepath.Join(repo, "link.txt")
-		os.WriteFile(target, []byte("x"), 0644)
-		// relative symlink: link.txt -> storage/file.txt
-		rel, _ := filepath.Rel(repo, target)
-		os.Symlink(rel, link)
-
-		err := fsys.ValidateSymlinkForRemove(link, repo)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			path, repo := tt.setup(t)
+			err := fsys.ValidateSymlinkForRemove(path, repo)
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("expected %v, got %v", tt.wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
 }
 
 func TestFileSystem_MoveFile(t *testing.T) {
+	t.Parallel()
+
 	fsys := fs.New()
 
-	t.Run("moves file and creates parent dirs", func(t *testing.T) {
+	t.Run("moves_file_and_creates_parent_dirs", func(t *testing.T) {
+		t.Parallel()
 		tmp := t.TempDir()
 		src := filepath.Join(tmp, "src.txt")
 		dst := filepath.Join(tmp, "nested", "dst.txt")
@@ -172,9 +208,12 @@ func TestFileSystem_MoveFile(t *testing.T) {
 }
 
 func TestFileSystem_MoveDirectory(t *testing.T) {
+	t.Parallel()
+
 	fsys := fs.New()
 
-	t.Run("moves directory with contents", func(t *testing.T) {
+	t.Run("moves_directory_with_contents", func(t *testing.T) {
+		t.Parallel()
 		tmp := t.TempDir()
 		src := filepath.Join(tmp, "src")
 		dst := filepath.Join(tmp, "moved", "dst")
@@ -196,45 +235,60 @@ func TestFileSystem_MoveDirectory(t *testing.T) {
 }
 
 func TestFileSystem_Move(t *testing.T) {
+	t.Parallel()
+
 	fsys := fs.New()
 
-	t.Run("delegates to MoveFile for files", func(t *testing.T) {
-		tmp := t.TempDir()
-		src := filepath.Join(tmp, "file.txt")
-		dst := filepath.Join(tmp, "moved.txt")
-		os.WriteFile(src, []byte("x"), 0644)
+	tests := []struct {
+		name  string
+		setup func(t *testing.T) (src, dst string, info os.FileInfo)
+	}{
+		{
+			name: "delegates_to_MoveFile_for_files",
+			setup: func(t *testing.T) (string, string, os.FileInfo) {
+				tmp := t.TempDir()
+				src := filepath.Join(tmp, "file.txt")
+				dst := filepath.Join(tmp, "moved.txt")
+				os.WriteFile(src, []byte("x"), 0644)
+				info, _ := os.Stat(src)
+				return src, dst, info
+			},
+		},
+		{
+			name: "delegates_to_MoveDirectory_for_dirs",
+			setup: func(t *testing.T) (string, string, os.FileInfo) {
+				tmp := t.TempDir()
+				src := filepath.Join(tmp, "dir")
+				dst := filepath.Join(tmp, "moved", "dir")
+				os.MkdirAll(src, 0755)
+				info, _ := os.Stat(src)
+				return src, dst, info
+			},
+		},
+	}
 
-		info, _ := os.Stat(src)
-		err := fsys.Move(src, dst, info)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := os.Stat(dst); err != nil {
-			t.Fatal(err)
-		}
-	})
-
-	t.Run("delegates to MoveDirectory for dirs", func(t *testing.T) {
-		tmp := t.TempDir()
-		src := filepath.Join(tmp, "dir")
-		dst := filepath.Join(tmp, "moved", "dir")
-		os.MkdirAll(src, 0755)
-
-		info, _ := os.Stat(src)
-		err := fsys.Move(src, dst, info)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := os.Stat(dst); err != nil {
-			t.Fatal(err)
-		}
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			src, dst, info := tt.setup(t)
+			err := fsys.Move(src, dst, info)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(dst); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
 }
 
 func TestFileSystem_CreateSymlink(t *testing.T) {
+	t.Parallel()
+
 	fsys := fs.New()
 
-	t.Run("creates relative symlink", func(t *testing.T) {
+	t.Run("creates_relative_symlink", func(t *testing.T) {
+		t.Parallel()
 		tmp := t.TempDir()
 		target := filepath.Join(tmp, "storage", "file.txt")
 		link := filepath.Join(tmp, "link.txt")
@@ -262,67 +316,67 @@ func TestFileSystem_CreateSymlink(t *testing.T) {
 }
 
 func TestRemoveEmptyDirs(t *testing.T) {
-	t.Run("removes nested empty directories", func(t *testing.T) {
-		tmp := t.TempDir()
-		empty1 := filepath.Join(tmp, "a", "b", "c")
-		empty2 := filepath.Join(tmp, "a", "b")
-		keep := filepath.Join(tmp, "a", "keep")
-		os.MkdirAll(empty1, 0755)
-		os.MkdirAll(keep, 0755)
-		os.WriteFile(filepath.Join(keep, "file.txt"), []byte("x"), 0644)
+	t.Parallel()
 
-		err := fs.RemoveEmptyDirs(tmp)
-		if err != nil {
-			t.Fatal(err)
-		}
+	tests := []struct {
+		name  string
+		setup func(t *testing.T) (root string, removed []string, kept []string)
+	}{
+		{
+			name: "removes_nested_empty_directories",
+			setup: func(t *testing.T) (string, []string, []string) {
+				tmp := t.TempDir()
+				empty1 := filepath.Join(tmp, "a", "b", "c")
+				empty2 := filepath.Join(tmp, "a", "b")
+				keep := filepath.Join(tmp, "a", "keep")
+				os.MkdirAll(empty1, 0755)
+				os.MkdirAll(keep, 0755)
+				os.WriteFile(filepath.Join(keep, "file.txt"), []byte("x"), 0644)
+				return tmp, []string{empty1, empty2}, []string{keep}
+			},
+		},
+		{
+			name: "keeps_non_empty_root",
+			setup: func(t *testing.T) (string, []string, []string) {
+				tmp := t.TempDir()
+				os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("x"), 0644)
+				return tmp, nil, []string{tmp}
+			},
+		},
+		{
+			name: "removes_sibling_empty_dirs",
+			setup: func(t *testing.T) (string, []string, []string) {
+				tmp := t.TempDir()
+				emptyA := filepath.Join(tmp, "emptyA")
+				emptyB := filepath.Join(tmp, "emptyB")
+				full := filepath.Join(tmp, "full")
+				os.MkdirAll(emptyA, 0755)
+				os.MkdirAll(emptyB, 0755)
+				os.MkdirAll(full, 0755)
+				os.WriteFile(filepath.Join(full, "f.txt"), []byte("x"), 0644)
+				return tmp, []string{emptyA, emptyB}, []string{full}
+			},
+		},
+	}
 
-		if _, err := os.Stat(empty1); !os.IsNotExist(err) {
-			t.Error("expected empty1 to be removed")
-		}
-		if _, err := os.Stat(empty2); !os.IsNotExist(err) {
-			t.Error("expected empty2 to be removed")
-		}
-		if _, err := os.Stat(keep); err != nil {
-			t.Errorf("expected keep to exist: %v", err)
-		}
-	})
-
-	t.Run("keeps non-empty root", func(t *testing.T) {
-		tmp := t.TempDir()
-		os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("x"), 0644)
-
-		err := fs.RemoveEmptyDirs(tmp)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := os.Stat(tmp); err != nil {
-			t.Errorf("expected root to exist: %v", err)
-		}
-	})
-
-	t.Run("removes sibling empty dirs", func(t *testing.T) {
-		tmp := t.TempDir()
-		emptyA := filepath.Join(tmp, "emptyA")
-		emptyB := filepath.Join(tmp, "emptyB")
-		full := filepath.Join(tmp, "full")
-		os.MkdirAll(emptyA, 0755)
-		os.MkdirAll(emptyB, 0755)
-		os.MkdirAll(full, 0755)
-		os.WriteFile(filepath.Join(full, "f.txt"), []byte("x"), 0644)
-
-		err := fs.RemoveEmptyDirs(tmp)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if _, err := os.Stat(emptyA); !os.IsNotExist(err) {
-			t.Error("expected emptyA to be removed")
-		}
-		if _, err := os.Stat(emptyB); !os.IsNotExist(err) {
-			t.Error("expected emptyB to be removed")
-		}
-		if _, err := os.Stat(full); err != nil {
-			t.Errorf("expected full to exist: %v", err)
-		}
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			root, removed, kept := tt.setup(t)
+			err := fs.RemoveEmptyDirs(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, p := range removed {
+				if _, err := os.Stat(p); !os.IsNotExist(err) {
+					t.Errorf("expected %q to be removed", p)
+				}
+			}
+			for _, p := range kept {
+				if _, err := os.Stat(p); err != nil {
+					t.Errorf("expected %q to exist: %v", p, err)
+				}
+			}
+		})
+	}
 }
