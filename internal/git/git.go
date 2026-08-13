@@ -445,7 +445,10 @@ func (g *Git) Push() error {
 	}
 
 	g = New(g.repoPath, WithLongTimeout())
-	_, err = g.runGitCommand("push", "-u", "origin")
+	// Explicit HEAD refspec: without it, push fails with exit 128 when the
+	// branch has no upstream (fresh init + remote add) on any git config
+	// lacking push.autoSetupRemote.
+	_, err = g.runGitCommand("push", "-u", "origin", "HEAD")
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			return lnkerror.Wrap(ErrGitTimeout)

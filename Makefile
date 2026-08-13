@@ -61,7 +61,7 @@ build:
 ## test: Run tests
 test:
 	@echo "$(BLUE)Running tests...$(NC)"
-	@go test ./...
+	@GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null go test ./...
 	@echo "$(GREEN)Tests passed$(NC)"
 
 ## test-v: Run tests with verbose output
@@ -80,7 +80,7 @@ test-cover:
 ## test-integration: Run integration tests
 test-integration:
 	@echo "$(BLUE)Running integration tests...$(NC)"
-	@go test -tags integration ./tests/integration/
+	@GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null go test -tags integration ./tests/integration/
 	@echo "$(GREEN)Integration tests passed$(NC)"
 
 ## run: Run the application
