@@ -32,7 +32,7 @@ func pushAndClone(t *testing.T) (svc *service.Service, repoPath string) {
 // and pushes it, so a subsequent Pull will bring it in.
 func commitFileToRemote(t *testing.T, srcPath, filename, content string) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(srcPath, filename), []byte(content), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(srcPath, filename), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cmds := [][]string{
@@ -56,7 +56,7 @@ func TestCommit_StagesAndCommitsAllChanges(t *testing.T) {
 	// Write a file directly to repo storage without going through Add,
 	// so there's an unstaged change to commit.
 	storagePath := filepath.Join(repoPath, "common.lnk", ".bashrc")
-	if err := os.MkdirAll(filepath.Dir(storagePath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(storagePath), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	testhelpers.MakeFile(t, storagePath, "# bashrc")
@@ -370,7 +370,7 @@ func TestUpdate_PullsThenRestores(t *testing.T) {
 	// Push a tracked file to remote — write it into common.lnk/ and update
 	// the tracker so Restore has something to do after Pull.
 	commonLnk := filepath.Join(src, "common.lnk")
-	if err := os.MkdirAll(commonLnk, 0755); err != nil {
+	if err := os.MkdirAll(commonLnk, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	testhelpers.MakeFile(t, filepath.Join(commonLnk, ".bashrc"), "# bashrc")
@@ -387,7 +387,7 @@ func TestUpdate_PullsThenRestores(t *testing.T) {
 
 	// Also write the tracker entry so Restore knows about .bashrc.
 	trackerSrc := filepath.Join(src, ".lnk.common")
-	if err := os.WriteFile(trackerSrc, []byte(".bashrc\n"), 0644); err != nil {
+	if err := os.WriteFile(trackerSrc, []byte(".bashrc\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cmds = [][]string{

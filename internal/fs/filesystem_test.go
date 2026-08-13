@@ -34,7 +34,7 @@ func TestFileSystem_ValidateFileInfoForAdd(t *testing.T) {
 			setup: func(t *testing.T) string {
 				tmp := t.TempDir()
 				path := filepath.Join(tmp, "file.txt")
-				os.WriteFile(path, []byte("hello"), 0644)
+				os.WriteFile(path, []byte("hello"), 0o644)
 				return path
 			},
 			wantErr: nil,
@@ -53,7 +53,7 @@ func TestFileSystem_ValidateFileInfoForAdd(t *testing.T) {
 				tmp := t.TempDir()
 				target := filepath.Join(tmp, "target")
 				link := filepath.Join(tmp, "link")
-				os.WriteFile(target, []byte("x"), 0644)
+				os.WriteFile(target, []byte("x"), 0o644)
 				os.Symlink(target, link)
 				return link
 			},
@@ -100,7 +100,7 @@ func TestFileSystem_ValidateSymlinkForRemove(t *testing.T) {
 			setup: func(t *testing.T) (string, string) {
 				tmp := t.TempDir()
 				path := filepath.Join(tmp, "file.txt")
-				os.WriteFile(path, []byte("x"), 0644)
+				os.WriteFile(path, []byte("x"), 0o644)
 				return path, tmp
 			},
 			wantErr: lnkerror.ErrNotManaged,
@@ -117,10 +117,10 @@ func TestFileSystem_ValidateSymlinkForRemove(t *testing.T) {
 			setup: func(t *testing.T) (string, string) {
 				tmp := t.TempDir()
 				repo := filepath.Join(tmp, "repo")
-				os.MkdirAll(repo, 0755)
+				os.MkdirAll(repo, 0o755)
 				outside := filepath.Join(tmp, "outside")
 				link := filepath.Join(tmp, "link")
-				os.WriteFile(outside, []byte("x"), 0644)
+				os.WriteFile(outside, []byte("x"), 0o644)
 				os.Symlink(outside, link)
 				return link, repo
 			},
@@ -132,10 +132,10 @@ func TestFileSystem_ValidateSymlinkForRemove(t *testing.T) {
 				tmp := t.TempDir()
 				repo := filepath.Join(tmp, "repo")
 				storage := filepath.Join(repo, "storage")
-				os.MkdirAll(storage, 0755)
+				os.MkdirAll(storage, 0o755)
 				target := filepath.Join(storage, "file.txt")
 				link := filepath.Join(tmp, "link")
-				os.WriteFile(target, []byte("x"), 0644)
+				os.WriteFile(target, []byte("x"), 0o644)
 				os.Symlink(target, link)
 				return link, repo
 			},
@@ -147,10 +147,10 @@ func TestFileSystem_ValidateSymlinkForRemove(t *testing.T) {
 				tmp := t.TempDir()
 				repo := filepath.Join(tmp, "repo")
 				storage := filepath.Join(repo, "storage")
-				os.MkdirAll(storage, 0755)
+				os.MkdirAll(storage, 0o755)
 				target := filepath.Join(storage, "file.txt")
 				link := filepath.Join(repo, "link.txt")
-				os.WriteFile(target, []byte("x"), 0644)
+				os.WriteFile(target, []byte("x"), 0o644)
 				rel, _ := filepath.Rel(repo, target)
 				os.Symlink(rel, link)
 				return link, repo
@@ -187,7 +187,7 @@ func TestFileSystem_MoveFile(t *testing.T) {
 		tmp := t.TempDir()
 		src := filepath.Join(tmp, "src.txt")
 		dst := filepath.Join(tmp, "nested", "dst.txt")
-		os.WriteFile(src, []byte("hello"), 0644)
+		os.WriteFile(src, []byte("hello"), 0o644)
 
 		err := fsys.MoveFile(src, dst)
 		if err != nil {
@@ -217,8 +217,8 @@ func TestFileSystem_MoveDirectory(t *testing.T) {
 		tmp := t.TempDir()
 		src := filepath.Join(tmp, "src")
 		dst := filepath.Join(tmp, "moved", "dst")
-		os.MkdirAll(filepath.Join(src, "subdir"), 0755)
-		os.WriteFile(filepath.Join(src, "file.txt"), []byte("x"), 0644)
+		os.MkdirAll(filepath.Join(src, "subdir"), 0o755)
+		os.WriteFile(filepath.Join(src, "file.txt"), []byte("x"), 0o644)
 
 		err := fsys.MoveDirectory(src, dst)
 		if err != nil {
@@ -249,7 +249,7 @@ func TestFileSystem_Move(t *testing.T) {
 				tmp := t.TempDir()
 				src := filepath.Join(tmp, "file.txt")
 				dst := filepath.Join(tmp, "moved.txt")
-				os.WriteFile(src, []byte("x"), 0644)
+				os.WriteFile(src, []byte("x"), 0o644)
 				info, _ := os.Stat(src)
 				return src, dst, info
 			},
@@ -260,7 +260,7 @@ func TestFileSystem_Move(t *testing.T) {
 				tmp := t.TempDir()
 				src := filepath.Join(tmp, "dir")
 				dst := filepath.Join(tmp, "moved", "dir")
-				os.MkdirAll(src, 0755)
+				os.MkdirAll(src, 0o755)
 				info, _ := os.Stat(src)
 				return src, dst, info
 			},
@@ -292,8 +292,8 @@ func TestFileSystem_CreateSymlink(t *testing.T) {
 		tmp := t.TempDir()
 		target := filepath.Join(tmp, "storage", "file.txt")
 		link := filepath.Join(tmp, "link.txt")
-		os.MkdirAll(filepath.Dir(target), 0755)
-		os.WriteFile(target, []byte("x"), 0644)
+		os.MkdirAll(filepath.Dir(target), 0o755)
+		os.WriteFile(target, []byte("x"), 0o644)
 
 		err := fsys.CreateSymlink(target, link)
 		if err != nil {
@@ -329,9 +329,9 @@ func TestRemoveEmptyDirs(t *testing.T) {
 				empty1 := filepath.Join(tmp, "a", "b", "c")
 				empty2 := filepath.Join(tmp, "a", "b")
 				keep := filepath.Join(tmp, "a", "keep")
-				os.MkdirAll(empty1, 0755)
-				os.MkdirAll(keep, 0755)
-				os.WriteFile(filepath.Join(keep, "file.txt"), []byte("x"), 0644)
+				os.MkdirAll(empty1, 0o755)
+				os.MkdirAll(keep, 0o755)
+				os.WriteFile(filepath.Join(keep, "file.txt"), []byte("x"), 0o644)
 				return tmp, []string{empty1, empty2}, []string{keep}
 			},
 		},
@@ -339,7 +339,7 @@ func TestRemoveEmptyDirs(t *testing.T) {
 			name: "keeps_non_empty_root",
 			setup: func(t *testing.T) (string, []string, []string) {
 				tmp := t.TempDir()
-				os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("x"), 0644)
+				os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("x"), 0o644)
 				return tmp, nil, []string{tmp}
 			},
 		},
@@ -350,10 +350,10 @@ func TestRemoveEmptyDirs(t *testing.T) {
 				emptyA := filepath.Join(tmp, "emptyA")
 				emptyB := filepath.Join(tmp, "emptyB")
 				full := filepath.Join(tmp, "full")
-				os.MkdirAll(emptyA, 0755)
-				os.MkdirAll(emptyB, 0755)
-				os.MkdirAll(full, 0755)
-				os.WriteFile(filepath.Join(full, "f.txt"), []byte("x"), 0644)
+				os.MkdirAll(emptyA, 0o755)
+				os.MkdirAll(emptyB, 0o755)
+				os.MkdirAll(full, 0o755)
+				os.WriteFile(filepath.Join(full, "f.txt"), []byte("x"), 0o644)
 				return tmp, []string{emptyA, emptyB}, []string{full}
 			},
 		},

@@ -57,7 +57,7 @@ func TestHomeV1(t *testing.T) (svc *service.Service, home string) {
 	t.Setenv("XDG_CONFIG_HOME", "")
 
 	repoPath := filepath.Join(home, ".config", "lnk")
-	if err := os.MkdirAll(repoPath, 0755); err != nil {
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -73,7 +73,7 @@ func TestHomeV1(t *testing.T) (svc *service.Service, home string) {
 	}
 
 	markerPath := filepath.Join(repoPath, ".lnkrepo")
-	if err := os.WriteFile(markerPath, []byte("version=1\n"), 0644); err != nil {
+	if err := os.WriteFile(markerPath, []byte("version=1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	commitCmds := [][]string{
@@ -100,7 +100,7 @@ func TestHomeV1Legacy(t *testing.T) (svc *service.Service, home string) {
 	t.Setenv("XDG_CONFIG_HOME", "")
 
 	repoPath := filepath.Join(home, ".config", "lnk")
-	if err := os.MkdirAll(repoPath, 0755); err != nil {
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -116,7 +116,7 @@ func TestHomeV1Legacy(t *testing.T) (svc *service.Service, home string) {
 	}
 
 	lnkPath := filepath.Join(repoPath, ".lnk")
-	if err := os.WriteFile(lnkPath, []byte(""), 0644); err != nil {
+	if err := os.WriteFile(lnkPath, []byte(""), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	commitCmds := [][]string{
@@ -160,7 +160,7 @@ func PushInitialCommit(t *testing.T, remote string) string {
 		}
 	}
 
-	if err := os.WriteFile(filepath.Join(src, ".lnkrepo"), []byte("version=2\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(src, ".lnkrepo"), []byte("version=2\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cmds = [][]string{
@@ -188,10 +188,10 @@ func FileExists(t *testing.T, path string) bool {
 // MakeFile creates a file at the given absolute path with the given content.
 func MakeFile(t *testing.T, path, content string) {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -199,7 +199,7 @@ func MakeFile(t *testing.T, path, content string) {
 // MakeDir creates a directory at the given path.
 func MakeDir(t *testing.T, path string) {
 	t.Helper()
-	if err := os.MkdirAll(path, 0755); err != nil {
+	if err := os.MkdirAll(path, 0o755); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -309,7 +309,7 @@ func GitLog(t *testing.T, repoPath string) []string {
 func CommitEmptyScope(t *testing.T, repoPath, host string) {
 	t.Helper()
 	trackerPath := filepath.Join(repoPath, ".lnk."+host)
-	if err := os.WriteFile(trackerPath, []byte(""), 0644); err != nil {
+	if err := os.WriteFile(trackerPath, []byte(""), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cmds := [][]string{

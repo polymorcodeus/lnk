@@ -38,7 +38,10 @@ func (s *Service) Add(ctx context.Context, host string, paths []string) error {
 			return fmt.Errorf("path already managed in scope %s: %s", owner.Host, file.RelativePath)
 		}
 
-		files = append(files, file)
+		files = append(files, filemanager.FileToTrack{
+			AbsPath:      file.AbsPath,
+			RelativePath: file.RelativePath,
+		})
 	}
 
 	fm, err := s.fileManager(host)

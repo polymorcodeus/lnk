@@ -45,15 +45,15 @@ func setupTrackedFile(t *testing.T, repoPath, home, scope, relativePath, content
 	livePath = filepath.Join(home, relativePath)
 
 	// Write file to repo storage.
-	if err := os.MkdirAll(filepath.Dir(storagePath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(storagePath), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(storagePath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(storagePath, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	// Create symlink at live path pointing to storage.
-	if err := os.MkdirAll(filepath.Dir(livePath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(livePath), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	relTarget, err := filepath.Rel(filepath.Dir(livePath), storagePath)
@@ -84,7 +84,7 @@ func setupTrackedFile(t *testing.T, repoPath, home, scope, relativePath, content
 		entries += "\n"
 	}
 	entries += relativePath + "\n"
-	if err := os.WriteFile(trackerPath, []byte(entries), 0644); err != nil {
+	if err := os.WriteFile(trackerPath, []byte(entries), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -133,7 +133,7 @@ func setupTrackedDir(t *testing.T, repoPath, home, scope, relativePath string, f
 	livePath = filepath.Join(home, relativePath)
 
 	// Create directory and files in repo storage.
-	if err := os.MkdirAll(storagePath, 0755); err != nil {
+	if err := os.MkdirAll(storagePath, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	for name, content := range files {
@@ -141,7 +141,7 @@ func setupTrackedDir(t *testing.T, repoPath, home, scope, relativePath string, f
 	}
 
 	// Create symlink at live path pointing to storage directory.
-	if err := os.MkdirAll(filepath.Dir(livePath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(livePath), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	relTarget, err := filepath.Rel(filepath.Dir(livePath), storagePath)
@@ -172,7 +172,7 @@ func setupTrackedDir(t *testing.T, repoPath, home, scope, relativePath string, f
 		entries += "\n"
 	}
 	entries += relativePath + "\n"
-	if err := os.WriteFile(trackerPath, []byte(entries), 0644); err != nil {
+	if err := os.WriteFile(trackerPath, []byte(entries), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

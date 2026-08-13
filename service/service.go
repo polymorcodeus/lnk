@@ -84,6 +84,12 @@ type owner struct {
 	Host string
 }
 
+// homePath pairs a live absolute path with its path relative to $HOME.
+type homePath struct {
+	AbsPath      string
+	RelativePath string
+}
+
 // New returns a Service with sensible defaults.
 func New(repoPath string) *Service {
 	return NewBuilder(repoPath)
@@ -222,32 +228,32 @@ func (s *Service) findOwnerInScope(relativePath, host string) (*owner, error) {
 }
 
 // resolveRemovalScope determines which scope owns a path for removal/forget operations.
-func (s *Service) resolveRemovalScope(input, host string) (string, filemgr.FileToTrack, error) {
+func (s *Service) resolveRemovalScope(input, host string) (string, homePath, error) {
 	// host is explicitly not normalized to allow for input lookup across all scopes
 	file, err := homeRelativePath(input)
 	if err != nil {
-		return "", filemgr.FileToTrack{}, err
+		return "", homePath{}, err
 	}
 	if host != "" {
 		owner, ownerErr := s.findOwnerInScope(file.RelativePath, host)
 		if ownerErr != nil {
-			return "", filemgr.FileToTrack{}, ownerErr
+			return "", homePath{}, ownerErr
 		}
 		if owner == nil {
-			return "", filemgr.FileToTrack{}, fmt.Errorf("path is not managed in scope %s: %s", host, file.RelativePath)
+			return "", homePath{}, fmt.Errorf("path is not managed in scope %s: %s", host, file.RelativePath)
 		}
 		return host, file, nil
 	}
 
 	owner, ownerErr := s.findOwner(file.RelativePath)
 	if ownerErr != nil {
-		return "", filemgr.FileToTrack{}, ownerErr
+		return "", homePath{}, ownerErr
 	}
 	if owner == nil {
-		return "", filemgr.FileToTrack{}, fmt.Errorf("path is not managed: %s", file.RelativePath)
+		return "", homePath{}, fmt.Errorf("path is not managed: %s", file.RelativePath)
 	}
 	if owner.Host != scopeCommon {
-		return "", filemgr.FileToTrack{}, fmt.Errorf("path is managed in host scope %s; use --host %s", owner.Host, owner.Host)
+		return "", homePath{}, fmt.Errorf("path is managed in host scope %s; use --host %s", owner.Host, owner.Host)
 	}
 	return scopeCommon, file, nil
 }
@@ -338,24 +344,24 @@ func (s *Service) execGit(ctx context.Context, args ...string) error {
 }
 
 // homeRelativePath resolves an input path to an absolute path and its relative path from $HOME.
-func homeRelativePath(input string) (filemgr.FileToTrack, error) {
+func homeRelativePath(input string) (homePath, error) {
 	absPath, err := filepath.Abs(input)
 	if err != nil {
-		return filemgr.FileToTrack{}, fmt.Errorf("resolve path %s: %w", input, err)
+		return homePath{}, fmt.Errorf("resolve path %s: %w", input, err)
 	}
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return filemgr.FileToTrack{}, fmt.Errorf("resolve home directory: %w", err)
+		return homePath{}, fmt.Errorf("resolve home directory: %w", err)
 	}
 	relativePath, err := filepath.Rel(homeDir, absPath)
 	if err != nil {
-		return filemgr.FileToTrack{}, fmt.Errorf("resolve relative path %s: %w", input, err)
+		return homePath{}, fmt.Errorf("resolve relative path %s: %w", input, err)
 	}
 	cleaned := filepath.Clean(relativePath)
 	if cleaned == "." || strings.HasPrefix(cleaned, "..") || filepath.IsAbs(cleaned) {
-		return filemgr.FileToTrack{}, fmt.Errorf("path must be inside $HOME: %s", input)
+		return homePath{}, fmt.Errorf("path must be inside $HOME: %s", input)
 	}
-	file := filemgr.FileToTrack{
+	file := homePath{
 		RelativePath: cleaned,
 		AbsPath:      absPath,
 	}
@@ -441,11 +447,8 @@ func (s *Service) profileItems(host string) ([]profileItem, error) {
 // hasLnkMarker reports whether the version marker file exists in the repo.
 func (s *Service) hasLnkMarker() bool {
 	markerPath := filepath.Join(s.repoPath, repoMarkerFile)
-	if _, err := os.Stat(markerPath); errors.Is(err, os.ErrNotExist) {
-		return false
-	}
-
-	return true
+	_, err := os.Stat(markerPath)
+	return err == nil
 }
 
 // IsLnkRepository checks if the repository appears to be managed by lnk

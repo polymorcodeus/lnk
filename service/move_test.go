@@ -166,7 +166,7 @@ func TestMove_TargetScopeAlreadyOwnsPath(t *testing.T) {
 	// Manually write the entry into the host tracker to simulate a collision
 	// without going through Add.
 	hostTrackerPath := filepath.Join(repoPath, ".lnk.testhost")
-	if err := os.WriteFile(hostTrackerPath, []byte(".bashrc\n"), 0644); err != nil {
+	if err := os.WriteFile(hostTrackerPath, []byte(".bashrc\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

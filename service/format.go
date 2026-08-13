@@ -6,13 +6,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
+	"strconv"
+	"strings"
 
 	fspkg "github.com/polymorcodeus/lnk/internal/fs"
 	"github.com/polymorcodeus/lnk/internal/tracker"
 )
-
-var versionDigitRe = regexp.MustCompile(`\d`)
 
 // commonPath describes both legacy and v2 paths for commonScope
 type commonPath struct {
@@ -153,9 +152,11 @@ func (s *Service) FindVersion() (tracker.RepoFormat, error) {
 		}
 		return tracker.FormatUnknown, fmt.Errorf("unable to read repo marker: %w", err)
 	}
-	match := versionDigitRe.Find(bytes)
-	if match != nil {
-		return tracker.RepoFormat(match[0] - '0'), nil
+	ver, ok := strings.CutPrefix(string(bytes), "version=")
+	if ok {
+		if n, err := strconv.Atoi(strings.TrimSpace(ver)); err == nil {
+			return tracker.RepoFormat(n), nil
+		}
 	}
 
 	return tracker.FormatUnknown, fmt.Errorf("repo marker version is malformed")

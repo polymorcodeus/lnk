@@ -55,7 +55,7 @@ func pushToRemote(t *testing.T, remote string) string {
 		}
 	}
 
-	os.WriteFile(filepath.Join(src, "file.txt"), []byte("hello"), 0644)
+	os.WriteFile(filepath.Join(src, "file.txt"), []byte("hello"), 0o644)
 	pushCmds := [][]string{
 		{"git", "-C", src, "add", "file.txt"},
 		{"git", "-C", src, "commit", "-m", "initial"},
@@ -132,7 +132,7 @@ func TestGit_Commit(t *testing.T) {
 			name: "commits_staged_changes",
 			setup: func(t *testing.T, tmp string, g *git.Git) {
 				configureGit(t, g)
-				os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0644)
+				os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0o644)
 				if err := g.AddAll(); err != nil {
 					t.Fatal(err)
 				}
@@ -189,7 +189,7 @@ func TestGit_HasChanges(t *testing.T) {
 			t.Error("expected clean repo")
 		}
 
-		os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0644)
+		os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0o644)
 
 		dirty, err = g.HasChanges()
 		if err != nil {
@@ -211,7 +211,7 @@ func TestGit_Diff(t *testing.T) {
 		configureGit(t, g)
 
 		// Create and commit a tracked file
-		os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("original"), 0644)
+		os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("original"), 0o644)
 		if err := g.AddAll(); err != nil {
 			t.Fatal(err)
 		}
@@ -220,7 +220,7 @@ func TestGit_Diff(t *testing.T) {
 		}
 
 		// Modify the tracked file
-		os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0644)
+		os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0o644)
 
 		diff, err := g.Diff()
 		if err != nil {
@@ -240,7 +240,7 @@ func TestGit_AddAll(t *testing.T) {
 		tmp := t.TempDir()
 		g := initRepo(t, tmp)
 
-		os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0644)
+		os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0o644)
 
 		if err := g.AddAll(); err != nil {
 			t.Fatal(err)
@@ -274,7 +274,7 @@ func TestGit_GetStatus(t *testing.T) {
 				tmp := t.TempDir()
 				g := initRepo(t, tmp)
 				configureGit(t, g)
-				os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0644)
+				os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0o644)
 				if err := g.AddAll(); err != nil {
 					t.Fatal(err)
 				}
@@ -293,7 +293,7 @@ func TestGit_GetStatus(t *testing.T) {
 			setup: func(t *testing.T) (*git.Git, func()) {
 				tmp := t.TempDir()
 				g := initRepo(t, tmp)
-				os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0644)
+				os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0o644)
 				return g, func() {}
 			},
 			wantAhead:  0,
@@ -372,7 +372,7 @@ func TestGit_Push(t *testing.T) {
 				// Add another commit and push
 				g := git.New(src)
 				configureGit(t, g)
-				os.WriteFile(filepath.Join(src, "file2.txt"), []byte("world"), 0644)
+				os.WriteFile(filepath.Join(src, "file2.txt"), []byte("world"), 0o644)
 				if err := g.AddAll(); err != nil {
 					t.Fatal(err)
 				}
@@ -438,7 +438,7 @@ func TestGit_Pull(t *testing.T) {
 				// Add commit to source and push
 				gSrc := git.New(src)
 				configureGit(t, gSrc)
-				os.WriteFile(filepath.Join(src, "pulled.txt"), []byte("new"), 0644)
+				os.WriteFile(filepath.Join(src, "pulled.txt"), []byte("new"), 0o644)
 				if err := gSrc.AddAll(); err != nil {
 					t.Fatal(err)
 				}
@@ -498,8 +498,8 @@ func TestGit_Clone(t *testing.T) {
 				remote := newBareRemote(t)
 				_ = pushToRemote(t, remote)
 				dst := filepath.Join(t.TempDir(), "clone")
-				os.MkdirAll(dst, 0755)
-				os.WriteFile(filepath.Join(dst, "old.txt"), []byte("old"), 0644)
+				os.MkdirAll(dst, 0o755)
+				os.WriteFile(filepath.Join(dst, "old.txt"), []byte("old"), 0o644)
 				return remote, dst
 			},
 		},
@@ -540,7 +540,7 @@ func TestGit_Stage(t *testing.T) {
 			name: "stages_existing_file",
 			setup: func(t *testing.T, tmp string, g *git.Git) {
 				configureGit(t, g)
-				os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0644)
+				os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0o644)
 				if err := g.Stage("file.txt"); err != nil {
 					t.Fatalf("Stage: %v", err)
 				}
@@ -551,7 +551,7 @@ func TestGit_Stage(t *testing.T) {
 			name: "stages_deletion_of_removed_file",
 			setup: func(t *testing.T, tmp string, g *git.Git) {
 				configureGit(t, g)
-				os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0644)
+				os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0o644)
 				if err := g.AddAll(); err != nil {
 					t.Fatal(err)
 				}
@@ -624,7 +624,7 @@ func TestGit_HasStagedChanges(t *testing.T) {
 			name: "detects_staged_changes",
 			setup: func(t *testing.T, tmp string, g *git.Git) {
 				configureGit(t, g)
-				os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0644)
+				os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0o644)
 				_ = g.AddAll()
 			},
 			wantStaged: true,

@@ -53,7 +53,7 @@ func TestRunner_FindScript(t *testing.T) {
 			tmp := t.TempDir()
 			if tt.write != "" {
 				script := filepath.Join(tmp, "bootstrap.sh")
-				if err := os.WriteFile(script, []byte(tt.write), 0644); err != nil {
+				if err := os.WriteFile(script, []byte(tt.write), 0o644); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -83,7 +83,7 @@ func TestRunner_RunScript(t *testing.T) {
 		t.Parallel()
 		tmp := t.TempDir()
 		script := filepath.Join(tmp, "bootstrap.sh")
-		os.WriteFile(script, []byte("#!/bin/bash\necho hello"), 0755)
+		os.WriteFile(script, []byte("#!/bin/bash\necho hello"), 0o755)
 
 		r := bootstrapper.New(tmp, &fakeGit{isRepo: true})
 
