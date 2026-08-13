@@ -66,11 +66,7 @@ func TestHomeV1(t *testing.T) (svc *service.Service, home string) {
 		{"git", "-C", repoPath, "config", "user.email", "test@lnk"},
 		{"git", "-C", repoPath, "config", "user.name", "Lnk Test"},
 	}
-	for _, c := range gitCmds {
-		if out, err := exec.Command(c[0], c[1:]...).CombinedOutput(); err != nil {
-			t.Fatalf("%v: %v\n%s", c, err, out)
-		}
-	}
+	runGitCmds(t, gitCmds)
 
 	markerPath := filepath.Join(repoPath, ".lnkrepo")
 	if err := os.WriteFile(markerPath, []byte("version=1\n"), 0o644); err != nil {
@@ -80,11 +76,7 @@ func TestHomeV1(t *testing.T) (svc *service.Service, home string) {
 		{"git", "-C", repoPath, "add", ".lnkrepo"},
 		{"git", "-C", repoPath, "commit", "-m", "lnk: initialize repository"},
 	}
-	for _, c := range commitCmds {
-		if out, err := exec.Command(c[0], c[1:]...).CombinedOutput(); err != nil {
-			t.Fatalf("%v: %v\n%s", c, err, out)
-		}
-	}
+	runGitCmds(t, commitCmds)
 
 	return service.New(repoPath), home
 }
@@ -109,11 +101,7 @@ func TestHomeV1Legacy(t *testing.T) (svc *service.Service, home string) {
 		{"git", "-C", repoPath, "config", "user.email", "test@lnk"},
 		{"git", "-C", repoPath, "config", "user.name", "Lnk Test"},
 	}
-	for _, c := range gitCmds {
-		if out, err := exec.Command(c[0], c[1:]...).CombinedOutput(); err != nil {
-			t.Fatalf("%v: %v\n%s", c, err, out)
-		}
-	}
+	runGitCmds(t, gitCmds)
 
 	lnkPath := filepath.Join(repoPath, ".lnk")
 	if err := os.WriteFile(lnkPath, []byte(""), 0o644); err != nil {
@@ -123,11 +111,7 @@ func TestHomeV1Legacy(t *testing.T) (svc *service.Service, home string) {
 		{"git", "-C", repoPath, "add", ".lnk"},
 		{"git", "-C", repoPath, "commit", "-m", "lnk: initialize repository"},
 	}
-	for _, c := range commitCmds {
-		if out, err := exec.Command(c[0], c[1:]...).CombinedOutput(); err != nil {
-			t.Fatalf("%v: %v\n%s", c, err, out)
-		}
-	}
+	runGitCmds(t, commitCmds)
 
 	return service.New(repoPath), home
 }
@@ -154,11 +138,7 @@ func PushInitialCommit(t *testing.T, remote string) string {
 		{"git", "-C", src, "config", "user.name", "Lnk Test"},
 		{"git", "-C", src, "remote", "add", "origin", remote},
 	}
-	for _, c := range cmds {
-		if out, err := exec.Command(c[0], c[1:]...).CombinedOutput(); err != nil {
-			t.Fatalf("%v: %v\n%s", c, err, out)
-		}
-	}
+	runGitCmds(t, cmds)
 
 	if err := os.WriteFile(filepath.Join(src, ".lnkrepo"), []byte("version=2\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -168,11 +148,7 @@ func PushInitialCommit(t *testing.T, remote string) string {
 		{"git", "-C", src, "commit", "-m", "lnk: initialize repository"},
 		{"git", "-C", src, "push", "-u", "origin", "main"},
 	}
-	for _, c := range cmds {
-		if out, err := exec.Command(c[0], c[1:]...).CombinedOutput(); err != nil {
-			t.Fatalf("%v: %v\n%s", c, err, out)
-		}
-	}
+	runGitCmds(t, cmds)
 	return src
 }
 
@@ -288,6 +264,16 @@ func ReadTrackerForScope(t *testing.T, repoPath, scope string) string {
 
 // ---------- Git helpers ----------
 
+// runGitCmds runs a sequence of git commands, failing the test on the first error.
+func runGitCmds(t *testing.T, cmds [][]string) {
+	t.Helper()
+	for _, c := range cmds {
+		if out, err := exec.Command(c[0], c[1:]...).CombinedOutput(); err != nil {
+			t.Fatalf("%v: %v\n%s", c, err, out)
+		}
+	}
+}
+
 // GitLog returns the one-line git log for the repo at path.
 func GitLog(t *testing.T, repoPath string) []string {
 	t.Helper()
@@ -316,11 +302,7 @@ func CommitEmptyScope(t *testing.T, repoPath, host string) {
 		{"git", "-C", repoPath, "add", ".lnk." + host},
 		{"git", "-C", repoPath, "commit", "-m", "lnk: empty scope " + host},
 	}
-	for _, c := range cmds {
-		if out, err := exec.Command(c[0], c[1:]...).CombinedOutput(); err != nil {
-			t.Fatalf("%v: %v\n%s", c, err, out)
-		}
-	}
+	runGitCmds(t, cmds)
 }
 
 // RunGit executes a git command inside repoPath for integration tests.
@@ -343,11 +325,7 @@ func CommitDeletion(t *testing.T, repoPath, relativePath string) {
 		{"git", "-C", repoPath, "rm", "--ignore-unmatch", relativePath},
 		{"git", "-C", repoPath, "commit", "-m", "test: remove " + relativePath},
 	}
-	for _, c := range cmds {
-		if out, err := exec.Command(c[0], c[1:]...).CombinedOutput(); err != nil {
-			t.Fatalf("%v: %v\n%s", c, err, out)
-		}
-	}
+	runGitCmds(t, cmds)
 }
 
 // CommitFile stages and commits a file that was written directly to disk.
@@ -358,11 +336,7 @@ func CommitFile(t *testing.T, repoPath, relativePath string) {
 		{"git", "-C", repoPath, "add", relativePath},
 		{"git", "-C", repoPath, "commit", "-m", "test: add " + relativePath},
 	}
-	for _, c := range cmds {
-		if out, err := exec.Command(c[0], c[1:]...).CombinedOutput(); err != nil {
-			t.Fatalf("%v: %v\n%s", c, err, out)
-		}
-	}
+	runGitCmds(t, cmds)
 }
 
 // ConfigureGitIdentity sets git identity so that tests work without relying on
@@ -373,11 +347,7 @@ func ConfigureGitIdentity(t *testing.T, repoPath string) {
 		{"git", "-C", repoPath, "config", "user.email", "test@lnk"},
 		{"git", "-C", repoPath, "config", "user.name", "Lnk Test"},
 	}
-	for _, c := range cmds {
-		if out, err := exec.Command(c[0], c[1:]...).CombinedOutput(); err != nil {
-			t.Fatalf("%v: %v\n%s", c, err, out)
-		}
-	}
+	runGitCmds(t, cmds)
 }
 
 // ---------- Shell helpers ----------
