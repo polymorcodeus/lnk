@@ -72,7 +72,7 @@ func Execute() {
 // Call once per command invocation and reuse the result.
 func svc(repoFlag *string, opts ...service.Option) *service.Service {
 	resolvedRepo := service.ResolveRepoPath(strings.TrimSpace(*repoFlag))
-	return service.NewBuilder(resolvedRepo, opts...)
+	return service.New(resolvedRepo, opts...)
 }
 
 // newInitCmd returns the "init" subcommand.

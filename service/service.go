@@ -90,14 +90,8 @@ type homePath struct {
 }
 
 // New returns a Service with sensible defaults.
-func New(repoPath string) *Service {
-	return NewBuilder(repoPath)
-}
-
-// NewBuilder returns a Service with custom options.
-// Git is always configured; pass git.WithColor() or other git options
-// via service.WithGitOptions(...) if needed.
-func NewBuilder(repoPath string, opts ...Option) *Service {
+// Pass git.WithColor() or other git options via service.WithGitOptions(...) if needed.
+func New(repoPath string, opts ...Option) *Service {
 	s := &Service{
 		repoPath: repoPath,
 		git:      gitpkg.New(repoPath),
