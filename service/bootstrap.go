@@ -20,7 +20,7 @@ func (s *Service) Bootstrap(ctx context.Context, stdout, stderr io.Writer, stdin
 	if script == "" {
 		return false, nil
 	}
-	if err := runner.RunScript(script, stdout, stderr, stdin); err != nil {
+	if err := runner.RunScript(ctx, script, stdout, stderr, stdin); err != nil {
 		return true, err
 	}
 	return true, nil

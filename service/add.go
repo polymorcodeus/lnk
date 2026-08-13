@@ -54,12 +54,12 @@ func (s *Service) Add(ctx context.Context, host string, paths []string) error {
 		return err
 	}
 
-	if err := s.stagePaths(addResult.StagePaths...); err != nil {
+	if err := s.stagePaths(ctx, addResult.StagePaths...); err != nil {
 		return err
 	}
 
 	pathCommit := strings.Join(addResult.StagePaths, "\n")
-	if err := s.commit(fmt.Sprintf("lnk: added the following to %s\n%s", host, pathCommit)); err != nil {
+	if err := s.commit(ctx, fmt.Sprintf("lnk: added the following to %s\n%s", host, pathCommit)); err != nil {
 		fm.RollbackAll(addResult.Rollback)
 		return err
 	}

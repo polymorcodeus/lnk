@@ -3,6 +3,7 @@ package bootstrapper_test
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"os"
@@ -88,7 +89,7 @@ func TestRunner_RunScript(t *testing.T) {
 		r := bootstrapper.New(tmp, &fakeGit{isRepo: true})
 
 		var stdout bytes.Buffer
-		err := r.RunScript("bootstrap.sh", &stdout, io.Discard, nil)
+		err := r.RunScript(context.Background(), "bootstrap.sh", &stdout, io.Discard, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

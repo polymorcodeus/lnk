@@ -2,6 +2,7 @@
 package git_test
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -17,7 +18,7 @@ import (
 func initRepo(t *testing.T, path string) *git.Git {
 	t.Helper()
 	g := git.New(path)
-	if err := g.Init(); err != nil {
+	if err := g.Init(context.Background()); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
 	return g
@@ -26,7 +27,7 @@ func initRepo(t *testing.T, path string) *git.Git {
 func configureGit(t *testing.T, g *git.Git) {
 	t.Helper()
 	configured := false
-	if err := g.EnsureGitConfigOnce(&configured); err != nil {
+	if err := g.EnsureGitConfigOnce(context.Background(), &configured); err != nil {
 		t.Fatalf("EnsureGitConfigOnce: %v", err)
 	}
 }
@@ -45,7 +46,7 @@ func TestGit_Init(t *testing.T) {
 			t.Error("expected not a git repo before init")
 		}
 
-		if err := g.Init(); err != nil {
+		if err := g.Init(context.Background()); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
@@ -64,7 +65,7 @@ func TestGit_EnsureGitConfigOnce(t *testing.T) {
 		g := initRepo(t, tmp)
 		configured := false
 
-		if err := g.EnsureGitConfigOnce(&configured); err != nil {
+		if err := g.EnsureGitConfigOnce(context.Background(), &configured); err != nil {
 			t.Fatal(err)
 		}
 		if !configured {
@@ -72,7 +73,7 @@ func TestGit_EnsureGitConfigOnce(t *testing.T) {
 		}
 
 		// Idempotent: second call should not error and leave flag true
-		if err := g.EnsureGitConfigOnce(&configured); err != nil {
+		if err := g.EnsureGitConfigOnce(context.Background(), &configured); err != nil {
 			t.Fatal(err)
 		}
 		if !configured {
@@ -95,7 +96,7 @@ func TestGit_Commit(t *testing.T) {
 			setup: func(t *testing.T, tmp string, g *git.Git) {
 				configureGit(t, g)
 				os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0o644)
-				if err := g.AddAll(); err != nil {
+				if err := g.AddAll(context.Background()); err != nil {
 					t.Fatal(err)
 				}
 			},
@@ -118,7 +119,7 @@ func TestGit_Commit(t *testing.T) {
 			g := initRepo(t, tmp)
 			tt.setup(t, tmp, g)
 
-			err := g.Commit("test commit")
+			err := g.Commit(context.Background(), "test commit")
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected error")
@@ -143,7 +144,7 @@ func TestGit_HasChanges(t *testing.T) {
 		tmp := t.TempDir()
 		g := initRepo(t, tmp)
 
-		dirty, err := g.HasChanges()
+		dirty, err := g.HasChanges(context.Background())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -153,7 +154,7 @@ func TestGit_HasChanges(t *testing.T) {
 
 		os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0o644)
 
-		dirty, err = g.HasChanges()
+		dirty, err = g.HasChanges(context.Background())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -174,17 +175,17 @@ func TestGit_Diff(t *testing.T) {
 
 		// Create and commit a tracked file
 		os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("original"), 0o644)
-		if err := g.AddAll(); err != nil {
+		if err := g.AddAll(context.Background()); err != nil {
 			t.Fatal(err)
 		}
-		if err := g.Commit("initial"); err != nil {
+		if err := g.Commit(context.Background(), "initial"); err != nil {
 			t.Fatal(err)
 		}
 
 		// Modify the tracked file
 		os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0o644)
 
-		diff, err := g.Diff()
+		diff, err := g.Diff(context.Background())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -204,12 +205,12 @@ func TestGit_AddAll(t *testing.T) {
 
 		os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0o644)
 
-		if err := g.AddAll(); err != nil {
+		if err := g.AddAll(context.Background()); err != nil {
 			t.Fatal(err)
 		}
 
 		// Staged changes are still "dirty" until committed
-		dirty, err := g.HasChanges()
+		dirty, err := g.HasChanges(context.Background())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -237,10 +238,10 @@ func TestGit_GetStatus(t *testing.T) {
 				g := initRepo(t, tmp)
 				configureGit(t, g)
 				os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0o644)
-				if err := g.AddAll(); err != nil {
+				if err := g.AddAll(context.Background()); err != nil {
 					t.Fatal(err)
 				}
-				if err := g.Commit("initial"); err != nil {
+				if err := g.Commit(context.Background(), "initial"); err != nil {
 					t.Fatal(err)
 				}
 				return g, func() {}
@@ -271,7 +272,7 @@ func TestGit_GetStatus(t *testing.T) {
 
 				dst := filepath.Join(t.TempDir(), "clone")
 				g := git.New(dst)
-				if err := g.Clone(remote); err != nil {
+				if err := g.Clone(context.Background(), remote); err != nil {
 					t.Fatalf("Clone: %v", err)
 				}
 				return g, func() {}
@@ -289,7 +290,7 @@ func TestGit_GetStatus(t *testing.T) {
 			g, cleanup := tt.setup(t)
 			defer cleanup()
 
-			status, err := g.GetStatus()
+			status, err := g.GetStatus(context.Background())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -335,10 +336,10 @@ func TestGit_Push(t *testing.T) {
 				g := git.New(src)
 				configureGit(t, g)
 				os.WriteFile(filepath.Join(src, "file2.txt"), []byte("world"), 0o644)
-				if err := g.AddAll(); err != nil {
+				if err := g.AddAll(context.Background()); err != nil {
 					t.Fatal(err)
 				}
-				if err := g.Commit("second"); err != nil {
+				if err := g.Commit(context.Background(), "second"); err != nil {
 					t.Fatal(err)
 				}
 				return g, remote
@@ -351,7 +352,7 @@ func TestGit_Push(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			g, _ := tt.setup(t)
-			err := g.Push()
+			err := g.Push(context.Background())
 			if tt.wantErr != nil {
 				if err == nil {
 					t.Fatal("expected error")
@@ -393,7 +394,7 @@ func TestGit_Pull(t *testing.T) {
 				// Clone into dst
 				dst := filepath.Join(t.TempDir(), "clone")
 				g := git.New(dst)
-				if err := g.Clone(remote); err != nil {
+				if err := g.Clone(context.Background(), remote); err != nil {
 					t.Fatalf("Clone: %v", err)
 				}
 
@@ -401,13 +402,13 @@ func TestGit_Pull(t *testing.T) {
 				gSrc := git.New(src)
 				configureGit(t, gSrc)
 				os.WriteFile(filepath.Join(src, "pulled.txt"), []byte("new"), 0o644)
-				if err := gSrc.AddAll(); err != nil {
+				if err := gSrc.AddAll(context.Background()); err != nil {
 					t.Fatal(err)
 				}
-				if err := gSrc.Commit("add pulled"); err != nil {
+				if err := gSrc.Commit(context.Background(), "add pulled"); err != nil {
 					t.Fatal(err)
 				}
-				if err := gSrc.Push(); err != nil {
+				if err := gSrc.Push(context.Background()); err != nil {
 					t.Fatal(err)
 				}
 
@@ -421,7 +422,7 @@ func TestGit_Pull(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			g, _ := tt.setup(t)
-			err := g.Pull()
+			err := g.Pull(context.Background())
 			if tt.wantErr != nil {
 				if err == nil {
 					t.Fatal("expected error")
@@ -472,7 +473,7 @@ func TestGit_Clone(t *testing.T) {
 			t.Parallel()
 			remote, dst := tt.setup(t)
 			g := git.New(dst)
-			if err := g.Clone(remote); err != nil {
+			if err := g.Clone(context.Background(), remote); err != nil {
 				t.Fatalf("Clone: %v", err)
 			}
 			if !g.IsGitRepository() {
@@ -503,7 +504,7 @@ func TestGit_Stage(t *testing.T) {
 			setup: func(t *testing.T, tmp string, g *git.Git) {
 				configureGit(t, g)
 				os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0o644)
-				if err := g.Stage("file.txt"); err != nil {
+				if err := g.Stage(context.Background(), "file.txt"); err != nil {
 					t.Fatalf("Stage: %v", err)
 				}
 			},
@@ -514,14 +515,14 @@ func TestGit_Stage(t *testing.T) {
 			setup: func(t *testing.T, tmp string, g *git.Git) {
 				configureGit(t, g)
 				os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0o644)
-				if err := g.AddAll(); err != nil {
+				if err := g.AddAll(context.Background()); err != nil {
 					t.Fatal(err)
 				}
-				if err := g.Commit("initial"); err != nil {
+				if err := g.Commit(context.Background(), "initial"); err != nil {
 					t.Fatal(err)
 				}
 				os.Remove(filepath.Join(tmp, "file.txt"))
-				if err := g.Stage("file.txt"); err != nil {
+				if err := g.Stage(context.Background(), "file.txt"); err != nil {
 					t.Fatalf("Stage: %v", err)
 				}
 			},
@@ -530,7 +531,7 @@ func TestGit_Stage(t *testing.T) {
 		{
 			name: "ignores_untracked_missing_file",
 			setup: func(t *testing.T, tmp string, g *git.Git) {
-				if err := g.Stage("nonexistent.txt"); err != nil {
+				if err := g.Stage(context.Background(), "nonexistent.txt"); err != nil {
 					t.Fatalf("Stage: %v", err)
 				}
 			},
@@ -545,7 +546,7 @@ func TestGit_Stage(t *testing.T) {
 			g := initRepo(t, tmp)
 			tt.setup(t, tmp, g)
 
-			dirty, err := g.HasChanges()
+			dirty, err := g.HasChanges(context.Background())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -563,15 +564,9 @@ func TestGit_Options(t *testing.T) {
 		t.Parallel()
 		tmp := t.TempDir()
 		g := git.New(tmp, git.WithColor())
-		_ = g.Init()
+		_ = g.Init(context.Background())
 	})
 
-	t.Run("WithLongTimeout_uses_long_timeout", func(t *testing.T) {
-		t.Parallel()
-		tmp := t.TempDir()
-		g := git.New(tmp, git.WithLongTimeout())
-		_ = g.Init()
-	})
 }
 
 func TestGit_HasStagedChanges(t *testing.T) {
@@ -587,7 +582,7 @@ func TestGit_HasStagedChanges(t *testing.T) {
 			setup: func(t *testing.T, tmp string, g *git.Git) {
 				configureGit(t, g)
 				os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0o644)
-				_ = g.AddAll()
+				_ = g.AddAll(context.Background())
 			},
 			wantStaged: true,
 		},
@@ -607,7 +602,7 @@ func TestGit_HasStagedChanges(t *testing.T) {
 			g := initRepo(t, tmp)
 			tt.setup(t, tmp, g)
 
-			staged, err := g.HasStagedChanges()
+			staged, err := g.HasStagedChanges(context.Background())
 			if err != nil {
 				t.Fatal(err)
 			}

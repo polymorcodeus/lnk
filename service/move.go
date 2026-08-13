@@ -103,8 +103,8 @@ func (s *Service) Move(ctx context.Context, input string, toHost string, toCommo
 	if err != nil {
 		return err
 	}
-	if err := s.stagePaths(srclnkName, tgtlnkName, sourcePath, targetPath); err != nil {
+	if err := s.stagePaths(ctx, srclnkName, tgtlnkName, sourcePath, targetPath); err != nil {
 		return err
 	}
-	return s.commit(fmt.Sprintf("lnk: moved %s to %s", filepath.Base(file.RelativePath), targetHost))
+	return s.commit(ctx, fmt.Sprintf("lnk: moved %s to %s", filepath.Base(file.RelativePath), targetHost))
 }

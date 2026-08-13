@@ -62,10 +62,10 @@ func (s *Service) Format(ctx context.Context, ver1, ver2 bool) (string, error) {
 	if err := fspkg.RemoveEmptyDirs(s.repoPath); err != nil {
 		return "", err
 	}
-	if err := s.stagePaths(changedPaths...); err != nil {
+	if err := s.stagePaths(ctx, changedPaths...); err != nil {
 		return "", err
 	}
-	if err := s.commit("lnk: update repo format"); err != nil {
+	if err := s.commit(ctx, "lnk: update repo format"); err != nil {
 		return "", err
 	}
 	return "lnk repo formatted, run `lnk doctor --fix` to fix broken symlinks", nil

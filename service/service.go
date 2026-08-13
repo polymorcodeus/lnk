@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -139,11 +138,11 @@ func NormalizeHost(host string) string {
 }
 
 // commit is a thin wrapper that ensures git config is set once before committing.
-func (s *Service) commit(message string) error {
-	if err := s.git.EnsureGitConfigOnce(&s.gitConfigured); err != nil {
+func (s *Service) commit(ctx context.Context, message string) error {
+	if err := s.git.EnsureGitConfigOnce(ctx, &s.gitConfigured); err != nil {
 		return err
 	}
-	return s.git.Commit(message)
+	return s.git.Commit(ctx, message)
 }
 
 // requireGitRepo returns an error if the configured path is not a git repository.
@@ -314,25 +313,11 @@ func (s *Service) writeMarkerFile(ver string) error {
 }
 
 // stagePaths stages the given paths in the repo via internal git.Stage.
-func (s *Service) stagePaths(paths ...string) error {
+func (s *Service) stagePaths(ctx context.Context, paths ...string) error {
 	for _, path := range paths {
-		if err := s.git.Stage(path); err != nil {
+		if err := s.git.Stage(ctx, path); err != nil {
 			return err
 		}
-	}
-	return nil
-}
-
-// execGit runs a git command inside the repo directory.
-func (s *Service) execGit(ctx context.Context, args ...string) error {
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = s.repoPath
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		if len(output) > 0 {
-			return fmt.Errorf("git %s: %s", strings.Join(args, " "), strings.TrimSpace(string(output)))
-		}
-		return fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
 	}
 	return nil
 }

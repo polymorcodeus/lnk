@@ -120,7 +120,7 @@ func (s *Service) Doctor(ctx context.Context, host string, all, fix, pruneEmpty 
 	}
 
 	if fix {
-		dirty, err := s.git.HasChanges()
+		dirty, err := s.git.HasChanges(ctx)
 		if err != nil {
 			return DoctorReport{}, err
 		}
@@ -264,12 +264,12 @@ func (s *Service) doctorFix(ctx context.Context, host string, all, pruneEmpty bo
 
 	slices.Sort(stagePaths)
 	stagePaths = slices.Compact(stagePaths)
-	if err := s.stagePaths(stagePaths...); err != nil {
+	if err := s.stagePaths(ctx, stagePaths...); err != nil {
 		return DoctorReport{}, err
 	}
 
 	// Skip commit if staging produced no changes (e.g., file was never tracked)
-	hasChanges, err := s.git.HasChanges()
+	hasChanges, err := s.git.HasChanges(ctx)
 	if err != nil {
 		return DoctorReport{}, err
 	}
@@ -277,7 +277,7 @@ func (s *Service) doctorFix(ctx context.Context, host string, all, pruneEmpty bo
 		return report, nil
 	}
 
-	return report, s.commit("lnk: doctor fixes")
+	return report, s.commit(ctx, "lnk: doctor fixes")
 }
 
 // scanEmptyScopes returns host scope names whose tracker files exist but
