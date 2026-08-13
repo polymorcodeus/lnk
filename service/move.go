@@ -33,7 +33,7 @@ func (s *Service) Move(ctx context.Context, input string, toHost string, toCommo
 
 	var targetHost string
 	if toCommon {
-		targetHost = scopeCommon
+		targetHost = tracker.CommonScope
 	} else {
 		targetHost = toHost
 	}
@@ -76,7 +76,7 @@ func (s *Service) Move(ctx context.Context, input string, toHost string, toCommo
 		return fmt.Errorf("create target storage directory: %w", err)
 	}
 
-	fs := fspkg.New()
+	fs := &fspkg.FileSystem{}
 	if err := fs.Move(sourcePath, targetPath, info); err != nil {
 		return err
 	}

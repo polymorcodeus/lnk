@@ -24,11 +24,6 @@ var (
 // FileSystem handles file system operations
 type FileSystem struct{}
 
-// New creates a new FileSystem instance
-func New() *FileSystem {
-	return &FileSystem{}
-}
-
 // ValidateFileInfoForAdd validates that a file or directory can be added to lnk.
 func (fs *FileSystem) ValidateFileInfoForAdd(filePath string) (os.FileInfo, error) {
 	info, err := os.Lstat(filePath)

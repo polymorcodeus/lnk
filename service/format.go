@@ -79,7 +79,7 @@ func (s *Service) versionCommonItems() (map[string]commonPath, []string, error) 
 	if err != nil {
 		return nil, nil, err
 	}
-	commonItems, err := tracker.New(s.repoPath, "common", format).GetManagedItems()
+	commonItems, err := tracker.New(s.repoPath, tracker.CommonScope, format).GetManagedItems()
 	if err != nil {
 		return nil, nil, err
 	}

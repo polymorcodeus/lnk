@@ -174,10 +174,7 @@ func newMoveCmd(repoFlag *string) *cobra.Command {
 			if err := app.Move(cmd.Context(), args[0], toHost, toCommon); err != nil {
 				return err
 			}
-			target := "common"
-			if toHost != "" {
-				target = toHost
-			}
+			target := service.NormalizeHost(toHost)
 			_, err := fmt.Fprintf(cmd.OutOrStdout(), "Moved %s to %s scope\n", args[0], target)
 			return err
 		},

@@ -22,7 +22,6 @@ const (
 	repoMarkerFile    = ".lnkrepo"
 	repoMarkerVersion = "version=2\n"
 	repoMarkerLegacy  = "version=1\n"
-	scopeCommon       = "common"
 )
 
 // Service owns the v2 CLI semantics while reusing the existing low-level git
@@ -140,7 +139,7 @@ func (s *Service) RepoPath() string {
 // NormalizeHost returns "common" for an empty host string, otherwise returns the host unchanged.
 func NormalizeHost(host string) string {
 	if host == "" {
-		return scopeCommon
+		return tracker.CommonScope
 	}
 	return host
 }
@@ -167,7 +166,7 @@ func (s *Service) fileManager(host string) (*filemgr.Manager, error) {
 	if err != nil {
 		return nil, err
 	}
-	fs := fspkg.New()
+	fs := &fspkg.FileSystem{}
 	tr := tracker.New(s.repoPath, host, format)
 	return filemgr.New(s.repoPath, host, fs, tr), nil
 }
@@ -181,7 +180,7 @@ func (s *Service) hosts() ([]string, error) {
 	hosts := make([]string, 0)
 	for _, entry := range entries {
 		name := entry.Name()
-		if after, ok := strings.CutPrefix(name, ".lnk."); ok && after != "common" {
+		if after, ok := strings.CutPrefix(name, ".lnk."); ok && after != tracker.CommonScope {
 			hosts = append(hosts, after)
 		}
 	}
@@ -189,7 +188,7 @@ func (s *Service) hosts() ([]string, error) {
 
 	// prepend common host - covers both v1/v2 formatting
 	// used as first lookup target within scopes
-	return slices.Insert(hosts, 0, "common"), nil
+	return slices.Insert(hosts, 0, tracker.CommonScope), nil
 }
 
 // findOwner returns the first scope that manages the given relative path, or nil if none.
@@ -252,10 +251,10 @@ func (s *Service) resolveRemovalScope(input, host string) (string, homePath, err
 	if owner == nil {
 		return "", homePath{}, fmt.Errorf("path is not managed: %s", file.RelativePath)
 	}
-	if owner.Host != scopeCommon {
+	if owner.Host != tracker.CommonScope {
 		return "", homePath{}, fmt.Errorf("path is managed in host scope %s; use --host %s", owner.Host, owner.Host)
 	}
-	return scopeCommon, file, nil
+	return tracker.CommonScope, file, nil
 }
 
 // scanCollisions finds paths that are tracked in more than one scope.
@@ -311,7 +310,8 @@ func (s *Service) repointManagedSymlink(relativePath, targetPath string) error {
 	if err := os.Remove(livePath); err != nil {
 		return fmt.Errorf("remove existing symlink: %w", err)
 	}
-	return fspkg.New().CreateSymlink(targetPath, livePath)
+	fs := &fspkg.FileSystem{}
+	return fs.CreateSymlink(targetPath, livePath)
 }
 
 // writeMarkerFile writes the version marker to disk.
@@ -408,8 +408,8 @@ func (s *Service) profileItems(host string) ([]profileItem, error) {
 	}
 
 	// scopes should always include common, additional host added to scope
-	scopes := []string{"common"}
-	if host != "common" {
+	scopes := []string{tracker.CommonScope}
+	if host != tracker.CommonScope {
 		scopes = append(scopes, host)
 	}
 

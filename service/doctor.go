@@ -249,7 +249,7 @@ func (s *Service) doctorFix(ctx context.Context, host string, all, pruneEmpty bo
 		report.BrokenSymlinkFixSkipped = true
 	}
 
-	if pruneEmpty && (host == scopeCommon || all) && len(report.EmptyScopes) > 0 {
+	if pruneEmpty && (host == tracker.CommonScope || all) && len(report.EmptyScopes) > 0 {
 		pruned, paths, err := s.pruneEmptyScopes(report.EmptyScopes)
 		if err != nil {
 			return DoctorReport{}, err
@@ -293,7 +293,7 @@ func (s *Service) scanEmptyScopes() ([]string, error) {
 	}
 	var empty []string
 	for _, host := range hosts {
-		if host == scopeCommon {
+		if host == tracker.CommonScope {
 			continue
 		}
 		items, err := tracker.New(s.repoPath, host, format).GetManagedItems()
@@ -434,8 +434,8 @@ func (s *Service) doctorScopes(host string, all bool) ([]string, error) {
 	}
 
 	// Doctor scope should default to common even if no host is passed
-	scope := []string{scopeCommon}
-	if host != scopeCommon {
+	scope := []string{tracker.CommonScope}
+	if host != tracker.CommonScope {
 		return append(scope, host), nil
 	}
 	return scope, nil

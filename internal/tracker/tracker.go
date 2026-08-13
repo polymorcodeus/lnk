@@ -18,6 +18,9 @@ const (
 	FormatV2      RepoFormat = 2 // current: common.lnk subdir
 )
 
+// CommonScope is the scope name for files shared across all hosts.
+const CommonScope = "common"
+
 // Tracker manages the .lnk tracking file that records which files are managed.
 type Tracker struct {
 	repoPath string
@@ -41,7 +44,7 @@ func (t *Tracker) RepoPath() string {
 
 // LnkFileName returns the appropriate .lnk tracking file name.
 func (t *Tracker) LnkFileName() (string, error) {
-	if t.host == "common" {
+	if t.host == CommonScope {
 		switch t.format {
 		case FormatV2:
 			return ".lnk.common", nil
@@ -56,7 +59,7 @@ func (t *Tracker) LnkFileName() (string, error) {
 
 // HostStoragePath returns the storage path for host-specific or common files.
 func (t *Tracker) HostStoragePath() (string, error) {
-	if t.host == "common" {
+	if t.host == CommonScope {
 		switch t.format {
 		case FormatV2:
 			return filepath.Join(t.repoPath, "common.lnk"), nil
@@ -72,7 +75,7 @@ func (t *Tracker) HostStoragePath() (string, error) {
 // HostStorageRelPath returns the storage path relative to the repo path for
 // host-specific or common files.
 func (t *Tracker) HostStorageRelPath() (string, error) {
-	if t.host == "common" {
+	if t.host == CommonScope {
 		switch t.format {
 		case FormatV2:
 			return filepath.Join("common.lnk"), nil

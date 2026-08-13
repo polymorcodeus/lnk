@@ -14,7 +14,7 @@ import (
 func TestFileSystem_ValidateFileInfoForAdd(t *testing.T) {
 	t.Parallel()
 
-	fsys := fs.New()
+	var fsys fs.FileSystem
 
 	tests := []struct {
 		name    string
@@ -88,7 +88,7 @@ func TestFileSystem_ValidateFileInfoForAdd(t *testing.T) {
 func TestFileSystem_ValidateSymlinkForRemove(t *testing.T) {
 	t.Parallel()
 
-	fsys := fs.New()
+	var fsys fs.FileSystem
 
 	tests := []struct {
 		name    string
@@ -180,7 +180,7 @@ func TestFileSystem_ValidateSymlinkForRemove(t *testing.T) {
 func TestFileSystem_MoveFile(t *testing.T) {
 	t.Parallel()
 
-	fsys := fs.New()
+	var fsys fs.FileSystem
 
 	t.Run("moves_file_and_creates_parent_dirs", func(t *testing.T) {
 		t.Parallel()
@@ -210,7 +210,7 @@ func TestFileSystem_MoveFile(t *testing.T) {
 func TestFileSystem_MoveDirectory(t *testing.T) {
 	t.Parallel()
 
-	fsys := fs.New()
+	var fsys fs.FileSystem
 
 	t.Run("moves_directory_with_contents", func(t *testing.T) {
 		t.Parallel()
@@ -237,7 +237,7 @@ func TestFileSystem_MoveDirectory(t *testing.T) {
 func TestFileSystem_Move(t *testing.T) {
 	t.Parallel()
 
-	fsys := fs.New()
+	var fsys fs.FileSystem
 
 	tests := []struct {
 		name  string
@@ -285,7 +285,7 @@ func TestFileSystem_Move(t *testing.T) {
 func TestFileSystem_CreateSymlink(t *testing.T) {
 	t.Parallel()
 
-	fsys := fs.New()
+	var fsys fs.FileSystem
 
 	t.Run("creates_relative_symlink", func(t *testing.T) {
 		t.Parallel()
