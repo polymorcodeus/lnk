@@ -45,6 +45,15 @@ jobs:
 
       - name: Test
         run: go test -v -race -coverprofile=coverage.out ./...
+        env:
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_CONFIG_SYSTEM: /dev/null
+
+      - name: Integration tests
+        run: go test -v -tags integration ./tests/integration/
+        env:
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_CONFIG_SYSTEM: /dev/null
 
   lint:
     runs-on: ubuntu-latest

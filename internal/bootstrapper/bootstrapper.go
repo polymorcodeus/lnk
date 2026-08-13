@@ -49,7 +49,7 @@ func (r *Runner) FindScript() (string, error) {
 // RunScript executes the bootstrap script with configurable I/O.
 func (r *Runner) RunScript(scriptName string, stdout, stderr io.Writer, stdin io.Reader) error {
 	scriptPath := filepath.Join(r.repoPath, scriptName)
-	if err := os.Chmod(scriptPath, 0755); err != nil {
+	if err := os.Chmod(scriptPath, 0o755); err != nil {
 		return lnkerror.Wrap(lnkerror.ErrBootstrapPerms)
 	}
 

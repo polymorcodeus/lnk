@@ -265,7 +265,13 @@ type StatusInfo struct {
 // When no remote is configured, Remote is empty and Ahead counts local commits.
 func (g *Git) GetStatus() (*StatusInfo, error) {
 	// Get machine-readable dirty state
-	porcelain, _ := g.runGitCommand("status", "--porcelain")
+	porcelain, err := g.runGitCommand("status", "--porcelain")
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return nil, lnkerror.Wrap(ErrGitTimeout)
+		}
+		return nil, lnkerror.Wrap(ErrGitCommand)
+	}
 
 	// Get human-readable output with color config
 	output, err := g.runGitCommand("status")
@@ -439,7 +445,10 @@ func (g *Git) Push() error {
 	}
 
 	g = New(g.repoPath, WithLongTimeout())
-	_, err = g.runGitCommand("push", "-u", "origin")
+	// Explicit HEAD refspec: without it, push fails with exit 128 when the
+	// branch has no upstream (fresh init + remote add) on any git config
+	// lacking push.autoSetupRemote.
+	_, err = g.runGitCommand("push", "-u", "origin", "HEAD")
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			return lnkerror.Wrap(ErrGitTimeout)
@@ -479,7 +488,7 @@ func (g *Git) Clone(url string) error {
 
 	// Create parent directory
 	parentDir := filepath.Dir(g.repoPath)
-	if err := os.MkdirAll(parentDir, 0755); err != nil {
+	if err := os.MkdirAll(parentDir, 0o755); err != nil {
 		return lnkerror.WithPathAndSuggestion(ErrDirCreate, parentDir, err.Error())
 	}
 

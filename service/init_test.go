@@ -122,7 +122,7 @@ func TestClone_WithBootstrapScript(t *testing.T) {
 	// Add a bootstrap.sh that writes a sentinel file.
 	sentinel := filepath.Join(t.TempDir(), "bootstrap_ran")
 	script := "#!/bin/sh\ntouch " + sentinel + "\n"
-	if err := os.WriteFile(filepath.Join(src, "bootstrap.sh"), []byte(script), 0755); err != nil {
+	if err := os.WriteFile(filepath.Join(src, "bootstrap.sh"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	cmds := [][]string{

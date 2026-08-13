@@ -69,8 +69,7 @@ func Execute() {
 }
 
 // svc constructs a Service for the resolved repo path.
-// Call once per command invocation and reuse the result — construction
-// reads the version marker from disk.
+// Call once per command invocation and reuse the result.
 func svc(repoFlag *string, opts ...service.Option) *service.Service {
 	resolvedRepo := service.ResolveRepoPath(strings.TrimSpace(*repoFlag))
 	return service.NewBuilder(resolvedRepo, opts...)
@@ -152,7 +151,7 @@ func newAddCmd(repoFlag *string) *cobra.Command {
 			if err := app.Add(cmd.Context(), host, args); err != nil {
 				return err
 			}
-			_, err := fmt.Fprintf(cmd.OutOrStdout(), "Tracked %d path(s) in %s scope\n", len(args), host)
+			_, err := fmt.Fprintf(cmd.OutOrStdout(), "Tracked %d path(s) in %s scope\n", len(args), service.NormalizeHost(host))
 			return err
 		},
 	}
@@ -203,7 +202,7 @@ func newRemoveCmd(repoFlag *string) *cobra.Command {
 			if err := app.Remove(cmd.Context(), host, args[0]); err != nil {
 				return err
 			}
-			_, err := fmt.Fprintf(cmd.OutOrStdout(), "Removed %s from %s scope\n", args[0], host)
+			_, err := fmt.Fprintf(cmd.OutOrStdout(), "Removed %s from %s scope\n", args[0], service.NormalizeHost(host))
 			return err
 		},
 	}
@@ -225,7 +224,7 @@ func newForgetCmd(repoFlag *string) *cobra.Command {
 			if err := app.Forget(cmd.Context(), host, args[0]); err != nil {
 				return err
 			}
-			_, err := fmt.Fprintf(cmd.OutOrStdout(), "Forgot %s from %s scope\n", args[0], host)
+			_, err := fmt.Fprintf(cmd.OutOrStdout(), "Forgot %s from %s scope\n", args[0], service.NormalizeHost(host))
 			return err
 		},
 	}

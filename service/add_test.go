@@ -443,7 +443,7 @@ func TestAdd_V1Legacy_PreservesPriorEntries(t *testing.T) {
 	// write an entry directly into the .lnk file and commit it, then add a new file.
 	existingEntry := ".vimrc"
 	lnkPath := filepath.Join(repoPath, ".lnk")
-	if err := os.WriteFile(lnkPath, []byte(existingEntry+"\n"), 0644); err != nil {
+	if err := os.WriteFile(lnkPath, []byte(existingEntry+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	// Create the file in storage to satisfy tracker validation.

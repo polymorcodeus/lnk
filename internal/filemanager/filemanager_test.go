@@ -167,7 +167,7 @@ func TestManager_AddMultiple(t *testing.T) {
 			fsSetup: func(t *testing.T, s string) *fakeFileSystem {
 				return &fakeFileSystem{
 					validateFileInfoFunc: func(path string) (os.FileInfo, error) {
-						return &fakeFileInfo{name: filepath.Base(path), mode: 0644}, nil
+						return &fakeFileInfo{name: filepath.Base(path), mode: 0o644}, nil
 					},
 					moveFunc:          func(src, dst string, info os.FileInfo) error { return nil },
 					createSymlinkFunc: func(target, link string) error { return nil },
@@ -193,7 +193,7 @@ func TestManager_AddMultiple(t *testing.T) {
 			fsSetup: func(t *testing.T, s string) *fakeFileSystem {
 				return &fakeFileSystem{
 					validateFileInfoFunc: func(path string) (os.FileInfo, error) {
-						return &fakeFileInfo{name: filepath.Base(path), mode: 0644}, nil
+						return &fakeFileInfo{name: filepath.Base(path), mode: 0o644}, nil
 					},
 					moveFunc: func(src, dst string, info os.FileInfo) error {
 						if strings.Contains(dst, "file2") {
@@ -223,7 +223,7 @@ func TestManager_AddMultiple(t *testing.T) {
 			fsSetup: func(t *testing.T, s string) *fakeFileSystem {
 				return &fakeFileSystem{
 					validateFileInfoFunc: func(path string) (os.FileInfo, error) {
-						return &fakeFileInfo{name: filepath.Base(path), mode: 0644}, nil
+						return &fakeFileInfo{name: filepath.Base(path), mode: 0o644}, nil
 					},
 					moveFunc:          func(src, dst string, info os.FileInfo) error { return nil },
 					createSymlinkFunc: func(target, link string) error { return errors.New("permission denied") },
@@ -249,7 +249,7 @@ func TestManager_AddMultiple(t *testing.T) {
 			fsSetup: func(t *testing.T, s string) *fakeFileSystem {
 				return &fakeFileSystem{
 					validateFileInfoFunc: func(path string) (os.FileInfo, error) {
-						return &fakeFileInfo{name: filepath.Base(path), mode: 0644}, nil
+						return &fakeFileInfo{name: filepath.Base(path), mode: 0o644}, nil
 					},
 					moveFunc:          func(src, dst string, info os.FileInfo) error { return nil },
 					createSymlinkFunc: func(target, link string) error { return nil },
@@ -336,11 +336,11 @@ func TestManager_Remove(t *testing.T) {
 		t.Parallel()
 		tmp := t.TempDir()
 		repoPath := filepath.Join(tmp, "repo")
-		os.MkdirAll(repoPath, 0755)
+		os.MkdirAll(repoPath, 0o755)
 
 		target := filepath.Join(tmp, "storage", "foo")
-		os.MkdirAll(filepath.Dir(target), 0755)
-		os.WriteFile(target, []byte("hello"), 0644)
+		os.MkdirAll(filepath.Dir(target), 0o755)
+		os.WriteFile(target, []byte("hello"), 0o644)
 		link := filepath.Join(tmp, "link")
 		os.Symlink(target, link)
 

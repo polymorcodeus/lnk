@@ -12,7 +12,7 @@ import (
 
 // Init creates a new local repo when needed.
 func (s *Service) Init(ctx context.Context) error {
-	if err := os.MkdirAll(s.repoPath, 0755); err != nil {
+	if err := os.MkdirAll(s.repoPath, 0o755); err != nil {
 		return fmt.Errorf("failed to create lnk directory: %w", err)
 	}
 

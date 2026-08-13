@@ -149,7 +149,7 @@ func TestTracker_GetManagedItems(t *testing.T) {
 			if tt.content == "__REMOVE__" {
 				os.Remove(lnk)
 			} else {
-				os.WriteFile(lnk, []byte(tt.content), 0644)
+				os.WriteFile(lnk, []byte(tt.content), 0o644)
 			}
 
 			items, err := tr.GetManagedItems()

@@ -153,10 +153,15 @@ func TestIntegration_Recovery_InvalidEntry(t *testing.T) {
 		t.Fatalf("Add: %v", err)
 	}
 
-	// Delete the storage file for .bashrc to create an invalid entry.
+	// Delete the storage file for .bashrc and commit the deletion, simulating
+	// the invalid state arriving via sync from another machine. Doctor --fix
+	// refuses to run on a dirty working tree.
 	bashrcStorage := filepath.Join(repoPath, "common.lnk", ".bashrc")
 	if err := os.Remove(bashrcStorage); err != nil {
 		t.Fatalf("remove storage: %v", err)
+	}
+	if err := svc.Commit(context.Background(), "lnk: remove bashrc storage"); err != nil {
+		t.Fatalf("commit storage removal: %v", err)
 	}
 
 	// Doctor scan should detect the invalid entry.

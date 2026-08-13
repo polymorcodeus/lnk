@@ -136,7 +136,7 @@ func (fm *Manager) processFiles(files []validatedFile) ([]string, []func() error
 		relPath := filepath.Join(storageRelPath, f.relativePath)
 
 		destDir := filepath.Dir(destPath)
-		if err := os.MkdirAll(destDir, 0755); err != nil {
+		if err := os.MkdirAll(destDir, 0o755); err != nil {
 			fm.RollbackAll(rollbackActions)
 			return nil, nil, fmt.Errorf("failed to create destination directory: %w", err)
 		}

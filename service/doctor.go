@@ -1,4 +1,3 @@
-// Package service implements the v2 lnk command semantics.
 package service
 
 import (

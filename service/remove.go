@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 
+	"github.com/polymorcodeus/lnk/internal/filemanager"
 	"github.com/polymorcodeus/lnk/internal/tracker"
 )
 
@@ -27,7 +28,10 @@ func (s *Service) Remove(ctx context.Context, host, input string) error {
 		return err
 	}
 
-	removeResult, err := fm.Remove(file)
+	removeResult, err := fm.Remove(filemanager.FileToTrack{
+		AbsPath:      file.AbsPath,
+		RelativePath: file.RelativePath,
+	})
 	if err != nil {
 		return err
 	}

@@ -152,7 +152,7 @@ func TestDoctor_OwnershipCollision(t *testing.T) {
 
 	// Write the same path into a host tracker to create a collision.
 	hostTracker := filepath.Join(repoPath, ".lnk.testhost")
-	if err := os.WriteFile(hostTracker, []byte(".bashrc\n"), 0644); err != nil {
+	if err := os.WriteFile(hostTracker, []byte(".bashrc\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -500,7 +500,7 @@ func TestDoctor_PruneEmpty_Scan_DetectsEmptyScope(t *testing.T) {
 
 	// Write an empty tracker file directly to simulate a scope with no items.
 	emptyTracker := filepath.Join(repoPath, ".lnk.emptyhost")
-	if err := os.WriteFile(emptyTracker, []byte(""), 0644); err != nil {
+	if err := os.WriteFile(emptyTracker, []byte(""), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -557,7 +557,7 @@ func TestDoctor_PruneEmpty_Scan_MultipleEmptyScopes(t *testing.T) {
 	// Write two empty tracker files.
 	for _, host := range []string{"ahost", "zhost"} {
 		p := filepath.Join(repoPath, ".lnk."+host)
-		if err := os.WriteFile(p, []byte(""), 0644); err != nil {
+		if err := os.WriteFile(p, []byte(""), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -608,7 +608,7 @@ func TestDoctor_PruneEmpty_Fix_RemovesEmptyStorageDir(t *testing.T) {
 	// Create empty tracker committed to git and empty storage directory.
 	testhelpers.CommitEmptyScope(t, repoPath, "emptyhost")
 	storageDir := filepath.Join(repoPath, "emptyhost.lnk")
-	if err := os.MkdirAll(storageDir, 0755); err != nil {
+	if err := os.MkdirAll(storageDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 

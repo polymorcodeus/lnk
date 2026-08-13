@@ -96,7 +96,7 @@ func (fs *FileSystem) Move(src, dst string, info os.FileInfo) error {
 
 // MoveFile moves a file from source to destination
 func (fs *FileSystem) MoveFile(src, dst string) error {
-	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return lnkerror.WithPath(ErrDirCreate, filepath.Dir(dst))
 	}
 
@@ -115,7 +115,7 @@ func (fs *FileSystem) CreateSymlink(target, linkPath string) error {
 
 // MoveDirectory moves a directory from source to destination recursively
 func (fs *FileSystem) MoveDirectory(src, dst string) error {
-	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return lnkerror.WithPath(ErrDirCreate, filepath.Dir(dst))
 	}
 

@@ -33,7 +33,7 @@ func TestBootstrap_ScriptFoundAndRuns(t *testing.T) {
 	sentinel := filepath.Join(t.TempDir(), "bootstrap_ran")
 	script := "#!/bin/sh\ntouch " + sentinel + "\n"
 	scriptPath := filepath.Join(repoPath, "bootstrap.sh")
-	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -55,7 +55,7 @@ func TestBootstrap_ScriptFails(t *testing.T) {
 
 	script := "#!/bin/sh\nexit 1\n"
 	scriptPath := filepath.Join(repoPath, "bootstrap.sh")
-	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 

@@ -161,7 +161,7 @@ func (t *Tracker) WriteManagedItems(items []string) error {
 		content += "\n"
 	}
 
-	err = os.WriteFile(lnkFile, []byte(content), 0644)
+	err = os.WriteFile(lnkFile, []byte(content), 0o644)
 	if err != nil {
 		return fmt.Errorf("failed to write .lnk file: %w", err)
 	}

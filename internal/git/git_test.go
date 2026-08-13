@@ -4,12 +4,12 @@ package git_test
 import (
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/polymorcodeus/lnk/internal/git"
+	"github.com/polymorcodeus/lnk/internal/testhelpers"
 )
 
 // ---------- helpers ----------
@@ -29,44 +29,6 @@ func configureGit(t *testing.T, g *git.Git) {
 	if err := g.EnsureGitConfigOnce(&configured); err != nil {
 		t.Fatalf("EnsureGitConfigOnce: %v", err)
 	}
-}
-
-func newBareRemote(t *testing.T) string {
-	t.Helper()
-	remote := t.TempDir()
-	if out, err := exec.Command("git", "init", "--bare", "-b", "main", remote).CombinedOutput(); err != nil {
-		t.Fatalf("git init --bare: %v\n%s", err, out)
-	}
-	return remote
-}
-
-func pushToRemote(t *testing.T, remote string) string {
-	t.Helper()
-	src := t.TempDir()
-	cmds := [][]string{
-		{"git", "-C", src, "init", "-b", "main"},
-		{"git", "-C", src, "config", "user.email", "test@lnk"},
-		{"git", "-C", src, "config", "user.name", "Lnk Test"},
-		{"git", "-C", src, "remote", "add", "origin", remote},
-	}
-	for _, c := range cmds {
-		if out, err := exec.Command(c[0], c[1:]...).CombinedOutput(); err != nil {
-			t.Fatalf("%v: %v\n%s", c, err, out)
-		}
-	}
-
-	os.WriteFile(filepath.Join(src, "file.txt"), []byte("hello"), 0644)
-	pushCmds := [][]string{
-		{"git", "-C", src, "add", "file.txt"},
-		{"git", "-C", src, "commit", "-m", "initial"},
-		{"git", "-C", src, "push", "-u", "origin", "main"},
-	}
-	for _, c := range pushCmds {
-		if out, err := exec.Command(c[0], c[1:]...).CombinedOutput(); err != nil {
-			t.Fatalf("%v: %v\n%s", c, err, out)
-		}
-	}
-	return src
 }
 
 // ---------- tests ----------
@@ -132,7 +94,7 @@ func TestGit_Commit(t *testing.T) {
 			name: "commits_staged_changes",
 			setup: func(t *testing.T, tmp string, g *git.Git) {
 				configureGit(t, g)
-				os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0644)
+				os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0o644)
 				if err := g.AddAll(); err != nil {
 					t.Fatal(err)
 				}
@@ -189,7 +151,7 @@ func TestGit_HasChanges(t *testing.T) {
 			t.Error("expected clean repo")
 		}
 
-		os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0644)
+		os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0o644)
 
 		dirty, err = g.HasChanges()
 		if err != nil {
@@ -211,7 +173,7 @@ func TestGit_Diff(t *testing.T) {
 		configureGit(t, g)
 
 		// Create and commit a tracked file
-		os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("original"), 0644)
+		os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("original"), 0o644)
 		if err := g.AddAll(); err != nil {
 			t.Fatal(err)
 		}
@@ -220,7 +182,7 @@ func TestGit_Diff(t *testing.T) {
 		}
 
 		// Modify the tracked file
-		os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0644)
+		os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0o644)
 
 		diff, err := g.Diff()
 		if err != nil {
@@ -240,7 +202,7 @@ func TestGit_AddAll(t *testing.T) {
 		tmp := t.TempDir()
 		g := initRepo(t, tmp)
 
-		os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0644)
+		os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0o644)
 
 		if err := g.AddAll(); err != nil {
 			t.Fatal(err)
@@ -274,7 +236,7 @@ func TestGit_GetStatus(t *testing.T) {
 				tmp := t.TempDir()
 				g := initRepo(t, tmp)
 				configureGit(t, g)
-				os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0644)
+				os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0o644)
 				if err := g.AddAll(); err != nil {
 					t.Fatal(err)
 				}
@@ -293,7 +255,7 @@ func TestGit_GetStatus(t *testing.T) {
 			setup: func(t *testing.T) (*git.Git, func()) {
 				tmp := t.TempDir()
 				g := initRepo(t, tmp)
-				os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0644)
+				os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0o644)
 				return g, func() {}
 			},
 			wantAhead:  0,
@@ -304,8 +266,8 @@ func TestGit_GetStatus(t *testing.T) {
 		{
 			name: "status_with_remote",
 			setup: func(t *testing.T) (*git.Git, func()) {
-				remote := newBareRemote(t)
-				_ = pushToRemote(t, remote)
+				remote := testhelpers.NewBareRemote(t)
+				_ = testhelpers.PushInitialCommit(t, remote)
 
 				dst := filepath.Join(t.TempDir(), "clone")
 				g := git.New(dst)
@@ -366,13 +328,13 @@ func TestGit_Push(t *testing.T) {
 		{
 			name: "pushes_to_remote",
 			setup: func(t *testing.T) (*git.Git, string) {
-				remote := newBareRemote(t)
-				src := pushToRemote(t, remote)
+				remote := testhelpers.NewBareRemote(t)
+				src := testhelpers.PushInitialCommit(t, remote)
 
 				// Add another commit and push
 				g := git.New(src)
 				configureGit(t, g)
-				os.WriteFile(filepath.Join(src, "file2.txt"), []byte("world"), 0644)
+				os.WriteFile(filepath.Join(src, "file2.txt"), []byte("world"), 0o644)
 				if err := g.AddAll(); err != nil {
 					t.Fatal(err)
 				}
@@ -425,8 +387,8 @@ func TestGit_Pull(t *testing.T) {
 		{
 			name: "pulls_from_remote",
 			setup: func(t *testing.T) (*git.Git, string) {
-				remote := newBareRemote(t)
-				src := pushToRemote(t, remote)
+				remote := testhelpers.NewBareRemote(t)
+				src := testhelpers.PushInitialCommit(t, remote)
 
 				// Clone into dst
 				dst := filepath.Join(t.TempDir(), "clone")
@@ -438,7 +400,7 @@ func TestGit_Pull(t *testing.T) {
 				// Add commit to source and push
 				gSrc := git.New(src)
 				configureGit(t, gSrc)
-				os.WriteFile(filepath.Join(src, "pulled.txt"), []byte("new"), 0644)
+				os.WriteFile(filepath.Join(src, "pulled.txt"), []byte("new"), 0o644)
 				if err := gSrc.AddAll(); err != nil {
 					t.Fatal(err)
 				}
@@ -486,8 +448,8 @@ func TestGit_Clone(t *testing.T) {
 		{
 			name: "clones_from_bare_remote",
 			setup: func(t *testing.T) (string, string) {
-				remote := newBareRemote(t)
-				_ = pushToRemote(t, remote)
+				remote := testhelpers.NewBareRemote(t)
+				_ = testhelpers.PushInitialCommit(t, remote)
 				dst := filepath.Join(t.TempDir(), "clone")
 				return remote, dst
 			},
@@ -495,11 +457,11 @@ func TestGit_Clone(t *testing.T) {
 		{
 			name: "overwrites_existing_directory",
 			setup: func(t *testing.T) (string, string) {
-				remote := newBareRemote(t)
-				_ = pushToRemote(t, remote)
+				remote := testhelpers.NewBareRemote(t)
+				_ = testhelpers.PushInitialCommit(t, remote)
 				dst := filepath.Join(t.TempDir(), "clone")
-				os.MkdirAll(dst, 0755)
-				os.WriteFile(filepath.Join(dst, "old.txt"), []byte("old"), 0644)
+				os.MkdirAll(dst, 0o755)
+				os.WriteFile(filepath.Join(dst, "old.txt"), []byte("old"), 0o644)
 				return remote, dst
 			},
 		},
@@ -516,8 +478,8 @@ func TestGit_Clone(t *testing.T) {
 			if !g.IsGitRepository() {
 				t.Error("expected cloned directory to be a git repo")
 			}
-			if _, err := os.Stat(filepath.Join(dst, "file.txt")); err != nil {
-				t.Errorf("expected file.txt in clone: %v", err)
+			if _, err := os.Stat(filepath.Join(dst, ".lnkrepo")); err != nil {
+				t.Errorf("expected .lnkrepo in clone: %v", err)
 			}
 			if tt.name == "overwrites_existing_directory" {
 				if _, err := os.Stat(filepath.Join(dst, "old.txt")); !os.IsNotExist(err) {
@@ -540,7 +502,7 @@ func TestGit_Stage(t *testing.T) {
 			name: "stages_existing_file",
 			setup: func(t *testing.T, tmp string, g *git.Git) {
 				configureGit(t, g)
-				os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0644)
+				os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0o644)
 				if err := g.Stage("file.txt"); err != nil {
 					t.Fatalf("Stage: %v", err)
 				}
@@ -551,7 +513,7 @@ func TestGit_Stage(t *testing.T) {
 			name: "stages_deletion_of_removed_file",
 			setup: func(t *testing.T, tmp string, g *git.Git) {
 				configureGit(t, g)
-				os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0644)
+				os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0o644)
 				if err := g.AddAll(); err != nil {
 					t.Fatal(err)
 				}
@@ -624,7 +586,7 @@ func TestGit_HasStagedChanges(t *testing.T) {
 			name: "detects_staged_changes",
 			setup: func(t *testing.T, tmp string, g *git.Git) {
 				configureGit(t, g)
-				os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0644)
+				os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("hello"), 0o644)
 				_ = g.AddAll()
 			},
 			wantStaged: true,
