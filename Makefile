@@ -16,7 +16,7 @@ YELLOW=\033[0;33m
 BLUE=\033[0;34m
 NC=\033[0m # No Color
 
-.PHONY: help build test clean install uninstall fmt lint vet tidy run dev cross-compile release goreleaser-check goreleaser-snapshot
+.PHONY: help build test test-integration clean install uninstall fmt lint vet tidy run dev cross-compile release goreleaser-check goreleaser-snapshot
 
 ## help: Show this help message
 help:
@@ -27,6 +27,7 @@ help:
 	@echo "  test        Run tests"
 	@echo "  test-v      Run tests with verbose output"
 	@echo "  test-cover  Run tests with coverage"
+	@echo "  test-integration Run integration tests"
 	@echo "  run         Run the application"
 	@echo "  dev         Development mode with file watching"
 	@echo ""
@@ -76,6 +77,12 @@ test-cover:
 	@go tool cover -html=coverage.out -o coverage.html
 	@echo "$(GREEN)Coverage report generated: coverage.html$(NC)"
 
+## test-integration: Run integration tests
+test-integration:
+	@echo "$(BLUE)Running integration tests...$(NC)"
+	@go test -tags integration ./tests/integration/
+	@echo "$(GREEN)Integration tests passed$(NC)"
+
 ## run: Run the application
 run: build
 	@echo "$(BLUE)Running $(BINARY_NAME)...$(NC)"
@@ -116,7 +123,7 @@ tidy:
 	@echo "$(GREEN)Modules tidied$(NC)"
 
 ## check: Run all quality checks
-check: fmt vet lint test
+check: fmt vet lint test test-integration
 	@echo "$(GREEN)All quality checks passed$(NC)"
 
 ## install: Install binary to /usr/local/bin
