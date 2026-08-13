@@ -12,20 +12,20 @@ func (s *Service) Commit(ctx context.Context, message string) error {
 	if err := s.requireGitRepo(); err != nil {
 		return err
 	}
-	if err := s.git.EnsureGitConfigOnce(&s.gitConfigured); err != nil {
+	if err := s.git.EnsureGitConfigOnce(ctx, &s.gitConfigured); err != nil {
 		return err
 	}
-	hasChanges, err := s.git.HasChanges()
+	hasChanges, err := s.git.HasChanges(ctx)
 	if err != nil {
 		return err
 	}
 	if !hasChanges {
 		return fmt.Errorf("no changes to commit")
 	}
-	if err := s.git.AddAll(); err != nil {
+	if err := s.git.AddAll(ctx); err != nil {
 		return err
 	}
-	return s.commit(message)
+	return s.commit(ctx, message)
 }
 
 // Push pushes existing commits only.
@@ -33,14 +33,14 @@ func (s *Service) Push(ctx context.Context) error {
 	if err := s.requireGitRepo(); err != nil {
 		return err
 	}
-	hasChanges, err := s.git.HasChanges()
+	hasChanges, err := s.git.HasChanges(ctx)
 	if err != nil {
 		return err
 	}
 	if hasChanges {
 		return fmt.Errorf("working tree is dirty; run 'lnk commit' or commit manually before push")
 	}
-	return s.git.Push()
+	return s.git.Push(ctx)
 }
 
 // Pull updates the repo only.
@@ -48,7 +48,7 @@ func (s *Service) Pull(ctx context.Context) error {
 	if err := s.requireGitRepo(); err != nil {
 		return err
 	}
-	return s.git.Pull()
+	return s.git.Pull(ctx)
 }
 
 // Update pulls repo changes and then restores the effective machine profile.
@@ -64,7 +64,7 @@ func (s *Service) Status(ctx context.Context) (*gitpkg.StatusInfo, error) {
 	if err := s.requireGitRepo(); err != nil {
 		return nil, err
 	}
-	return s.git.GetStatus()
+	return s.git.GetStatus(ctx)
 }
 
 // Diff returns the uncommitted repo diff.
@@ -72,5 +72,5 @@ func (s *Service) Diff(ctx context.Context) (string, error) {
 	if err := s.requireGitRepo(); err != nil {
 		return "", err
 	}
-	return s.git.Diff()
+	return s.git.Diff(ctx)
 }

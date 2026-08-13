@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/polymorcodeus/lnk/internal/tracker"
 	"github.com/polymorcodeus/lnk/service"
 )
 
@@ -210,13 +211,13 @@ func AssertSymlink(t *testing.T, path, expectedTarget string) {
 // AssertTracked checks that relativePath appears in the common tracker file.
 func AssertTracked(t *testing.T, repoPath, relativePath string) {
 	t.Helper()
-	AssertTrackedInScope(t, repoPath, "common", relativePath)
+	AssertTrackedInScope(t, repoPath, tracker.CommonScope, relativePath)
 }
 
 // AssertNotTracked checks that relativePath does not appear in the common tracker.
 func AssertNotTracked(t *testing.T, repoPath, relativePath string) {
 	t.Helper()
-	AssertNotTrackedInScope(t, repoPath, "common", relativePath)
+	AssertNotTrackedInScope(t, repoPath, tracker.CommonScope, relativePath)
 }
 
 // AssertTrackedInScope checks that relativePath appears in the tracker for scope.
@@ -248,7 +249,7 @@ func AssertNotTrackedInScope(t *testing.T, repoPath, scope, relativePath string)
 func ReadTrackerForScope(t *testing.T, repoPath, scope string) string {
 	t.Helper()
 	var candidates []string
-	if scope == "" || scope == "common" {
+	if scope == "" || scope == tracker.CommonScope {
 		candidates = []string{".lnk.common", ".lnk"}
 	} else {
 		candidates = []string{".lnk." + scope}

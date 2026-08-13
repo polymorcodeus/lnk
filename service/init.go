@@ -23,7 +23,7 @@ func (s *Service) Init(ctx context.Context) error {
 		return lnkerror.WithPathAndSuggestion(lnkerror.ErrGitRepoExists, s.repoPath, "run 'lnk doctor --fix' to add lnkmarker to repo")
 	}
 
-	if err := s.git.Init(); err != nil {
+	if err := s.git.Init(ctx); err != nil {
 		return err
 	}
 
@@ -31,15 +31,15 @@ func (s *Service) Init(ctx context.Context) error {
 	if err := s.writeMarkerFile(repoMarkerVersion); err != nil {
 		return err
 	}
-	if err := s.stagePaths(repoMarkerFile); err != nil {
+	if err := s.stagePaths(ctx, repoMarkerFile); err != nil {
 		return err
 	}
-	return s.commit("lnk: initialize repository")
+	return s.commit(ctx, "lnk: initialize repository")
 }
 
 // Clone clones a remote repo and optionally runs bootstrap.
 func (s *Service) Clone(ctx context.Context, url string, runBootstrap bool, stdout, stderr io.Writer, stdin io.Reader) (bool, error) {
-	if err := s.git.Clone(url); err != nil {
+	if err := s.git.Clone(ctx, url); err != nil {
 		return false, err
 	}
 
@@ -56,7 +56,7 @@ func (s *Service) Clone(ctx context.Context, url string, runBootstrap bool, stdo
 		return false, nil
 	}
 
-	if err := runner.RunScript(script, stdout, stderr, stdin); err != nil {
+	if err := runner.RunScript(ctx, script, stdout, stderr, stdin); err != nil {
 		return true, err
 	}
 	return true, nil

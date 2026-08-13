@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -22,7 +21,6 @@ const (
 	repoMarkerFile    = ".lnkrepo"
 	repoMarkerVersion = "version=2\n"
 	repoMarkerLegacy  = "version=1\n"
-	scopeCommon       = "common"
 )
 
 // Service owns the v2 CLI semantics while reusing the existing low-level git
@@ -91,14 +89,8 @@ type homePath struct {
 }
 
 // New returns a Service with sensible defaults.
-func New(repoPath string) *Service {
-	return NewBuilder(repoPath)
-}
-
-// NewBuilder returns a Service with custom options.
-// Git is always configured; pass git.WithColor() or other git options
-// via service.WithGitOptions(...) if needed.
-func NewBuilder(repoPath string, opts ...Option) *Service {
+// Pass git.WithColor() or other git options via service.WithGitOptions(...) if needed.
+func New(repoPath string, opts ...Option) *Service {
 	s := &Service{
 		repoPath: repoPath,
 		git:      gitpkg.New(repoPath),
@@ -140,17 +132,17 @@ func (s *Service) RepoPath() string {
 // NormalizeHost returns "common" for an empty host string, otherwise returns the host unchanged.
 func NormalizeHost(host string) string {
 	if host == "" {
-		return scopeCommon
+		return tracker.CommonScope
 	}
 	return host
 }
 
 // commit is a thin wrapper that ensures git config is set once before committing.
-func (s *Service) commit(message string) error {
-	if err := s.git.EnsureGitConfigOnce(&s.gitConfigured); err != nil {
+func (s *Service) commit(ctx context.Context, message string) error {
+	if err := s.git.EnsureGitConfigOnce(ctx, &s.gitConfigured); err != nil {
 		return err
 	}
-	return s.git.Commit(message)
+	return s.git.Commit(ctx, message)
 }
 
 // requireGitRepo returns an error if the configured path is not a git repository.
@@ -167,7 +159,7 @@ func (s *Service) fileManager(host string) (*filemgr.Manager, error) {
 	if err != nil {
 		return nil, err
 	}
-	fs := fspkg.New()
+	fs := &fspkg.FileSystem{}
 	tr := tracker.New(s.repoPath, host, format)
 	return filemgr.New(s.repoPath, host, fs, tr), nil
 }
@@ -181,7 +173,7 @@ func (s *Service) hosts() ([]string, error) {
 	hosts := make([]string, 0)
 	for _, entry := range entries {
 		name := entry.Name()
-		if after, ok := strings.CutPrefix(name, ".lnk."); ok && after != "common" {
+		if after, ok := strings.CutPrefix(name, ".lnk."); ok && after != tracker.CommonScope {
 			hosts = append(hosts, after)
 		}
 	}
@@ -189,7 +181,7 @@ func (s *Service) hosts() ([]string, error) {
 
 	// prepend common host - covers both v1/v2 formatting
 	// used as first lookup target within scopes
-	return slices.Insert(hosts, 0, "common"), nil
+	return slices.Insert(hosts, 0, tracker.CommonScope), nil
 }
 
 // findOwner returns the first scope that manages the given relative path, or nil if none.
@@ -252,10 +244,10 @@ func (s *Service) resolveRemovalScope(input, host string) (string, homePath, err
 	if owner == nil {
 		return "", homePath{}, fmt.Errorf("path is not managed: %s", file.RelativePath)
 	}
-	if owner.Host != scopeCommon {
+	if owner.Host != tracker.CommonScope {
 		return "", homePath{}, fmt.Errorf("path is managed in host scope %s; use --host %s", owner.Host, owner.Host)
 	}
-	return scopeCommon, file, nil
+	return tracker.CommonScope, file, nil
 }
 
 // scanCollisions finds paths that are tracked in more than one scope.
@@ -311,7 +303,8 @@ func (s *Service) repointManagedSymlink(relativePath, targetPath string) error {
 	if err := os.Remove(livePath); err != nil {
 		return fmt.Errorf("remove existing symlink: %w", err)
 	}
-	return fspkg.New().CreateSymlink(targetPath, livePath)
+	fs := &fspkg.FileSystem{}
+	return fs.CreateSymlink(targetPath, livePath)
 }
 
 // writeMarkerFile writes the version marker to disk.
@@ -320,25 +313,11 @@ func (s *Service) writeMarkerFile(ver string) error {
 }
 
 // stagePaths stages the given paths in the repo via internal git.Stage.
-func (s *Service) stagePaths(paths ...string) error {
+func (s *Service) stagePaths(ctx context.Context, paths ...string) error {
 	for _, path := range paths {
-		if err := s.git.Stage(path); err != nil {
+		if err := s.git.Stage(ctx, path); err != nil {
 			return err
 		}
-	}
-	return nil
-}
-
-// execGit runs a git command inside the repo directory.
-func (s *Service) execGit(ctx context.Context, args ...string) error {
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = s.repoPath
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		if len(output) > 0 {
-			return fmt.Errorf("git %s: %s", strings.Join(args, " "), strings.TrimSpace(string(output)))
-		}
-		return fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
 	}
 	return nil
 }
@@ -408,8 +387,8 @@ func (s *Service) profileItems(host string) ([]profileItem, error) {
 	}
 
 	// scopes should always include common, additional host added to scope
-	scopes := []string{"common"}
-	if host != "common" {
+	scopes := []string{tracker.CommonScope}
+	if host != tracker.CommonScope {
 		scopes = append(scopes, host)
 	}
 

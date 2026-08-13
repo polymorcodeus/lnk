@@ -30,7 +30,7 @@ func (s *Service) Restore(ctx context.Context, host string, dryRun bool) (Restor
 	}
 
 	info := RestoreInfo{}
-	fs := fspkg.New()
+	fs := &fspkg.FileSystem{}
 	for _, item := range items {
 		if _, err := os.Stat(item.RepoPath); errors.Is(err, os.ErrNotExist) {
 			continue

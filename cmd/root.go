@@ -72,7 +72,7 @@ func Execute() {
 // Call once per command invocation and reuse the result.
 func svc(repoFlag *string, opts ...service.Option) *service.Service {
 	resolvedRepo := service.ResolveRepoPath(strings.TrimSpace(*repoFlag))
-	return service.NewBuilder(resolvedRepo, opts...)
+	return service.New(resolvedRepo, opts...)
 }
 
 // newInitCmd returns the "init" subcommand.
@@ -174,10 +174,7 @@ func newMoveCmd(repoFlag *string) *cobra.Command {
 			if err := app.Move(cmd.Context(), args[0], toHost, toCommon); err != nil {
 				return err
 			}
-			target := "common"
-			if toHost != "" {
-				target = toHost
-			}
+			target := service.NormalizeHost(toHost)
 			_, err := fmt.Fprintf(cmd.OutOrStdout(), "Moved %s to %s scope\n", args[0], target)
 			return err
 		},

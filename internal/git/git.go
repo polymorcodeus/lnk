@@ -42,16 +42,10 @@ const (
 // Git handles Git operations
 type Git struct {
 	repoPath string
-	timeout  time.Duration
 	color    bool
 }
 
 type Option func(*Git)
-
-// WithLongTimeout sets ctx timeout for runGitCommand
-func WithLongTimeout() Option {
-	return func(g *Git) { g.timeout = longTimeout }
-}
 
 // WithColor sets color.ui=always for git commmands
 func WithColor() Option {
@@ -61,8 +55,6 @@ func WithColor() Option {
 func New(repoPath string, opts ...Option) *Git {
 	g := &Git{
 		repoPath: repoPath,
-		timeout:  shortTimeout,
-		color:    false,
 	}
 	for _, opt := range opts {
 		opt(g)
@@ -71,8 +63,8 @@ func New(repoPath string, opts ...Option) *Git {
 }
 
 // runGitCommand executes a git command with the given timeout.
-func (g *Git) runGitCommand(args ...string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), g.timeout)
+func (g *Git) runGitCommand(ctx context.Context, timeout time.Duration, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	var cmdArgs []string
@@ -87,12 +79,12 @@ func (g *Git) runGitCommand(args ...string) ([]byte, error) {
 }
 
 // Init initializes a new Git repository
-func (g *Git) Init() error {
+func (g *Git) Init(ctx context.Context) error {
 	// Try using git init -b main first (Git 2.28+)
-	_, err := g.runGitCommand("init", "-b", "main")
+	_, err := g.runGitCommand(ctx, shortTimeout, "init", "-b", "main")
 	if err != nil {
 		// Fallback to regular init + branch rename for older Git versions
-		_, err := g.runGitCommand("init")
+		_, err := g.runGitCommand(ctx, shortTimeout, "init")
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
 				return lnkerror.WithSuggestion(ErrGitTimeout, "check system resources and try again")
@@ -101,7 +93,7 @@ func (g *Git) Init() error {
 		}
 
 		// Set the default branch to main
-		_, err = g.runGitCommand("symbolic-ref", "HEAD", "refs/heads/main")
+		_, err = g.runGitCommand(ctx, shortTimeout, "symbolic-ref", "HEAD", "refs/heads/main")
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
 				return lnkerror.WithSuggestion(ErrGitTimeout, "check system resources and try again")
@@ -114,13 +106,13 @@ func (g *Git) Init() error {
 }
 
 // getRemoteURL returns the URL for a remote, or error if not found
-func (g *Git) getRemoteURL(name string) (string, error) {
-	output, err := g.runGitCommand("remote", "get-url", name)
+func (g *Git) getRemoteURL(ctx context.Context, name string) (string, error) {
+	output, err := g.runGitCommand(ctx, shortTimeout, "remote", "get-url", name)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			return "", lnkerror.Wrap(ErrGitTimeout)
 		}
-		return "", err
+		return "", lnkerror.Wrap(ErrGitCommand)
 	}
 
 	return strings.TrimSpace(string(output)), nil
@@ -134,12 +126,12 @@ func (g *Git) IsGitRepository() bool {
 }
 
 // Stage adds a path to the index, or stages its removal if it no longer exists.
-func (g *Git) Stage(path string) error {
+func (g *Git) Stage(ctx context.Context, path string) error {
 	fullPath := filepath.Join(g.repoPath, path)
 	if _, err := os.Stat(fullPath); os.IsNotExist(err) {
 		// File was deleted — stage the removal. --ignore-unmatch avoids
 		// erroring if the file was never tracked.
-		_, err := g.runGitCommand("rm", "--ignore-unmatch", path)
+		_, err := g.runGitCommand(ctx, shortTimeout, "rm", "--ignore-unmatch", path)
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
 				return lnkerror.Wrap(ErrGitTimeout)
@@ -150,7 +142,7 @@ func (g *Git) Stage(path string) error {
 	}
 
 	// File exists — stage normally.
-	_, err := g.runGitCommand("add", "-A", path)
+	_, err := g.runGitCommand(ctx, shortTimeout, "add", "-A", path)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			return lnkerror.Wrap(ErrGitTimeout)
@@ -161,8 +153,8 @@ func (g *Git) Stage(path string) error {
 }
 
 // Commit creates a commit with the given message
-func (g *Git) Commit(message string) error {
-	_, err := g.runGitCommand("commit", "-m", message)
+func (g *Git) Commit(ctx context.Context, message string) error {
+	_, err := g.runGitCommand(ctx, shortTimeout, "commit", "-m", message)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			return lnkerror.Wrap(ErrGitTimeout)
@@ -174,11 +166,11 @@ func (g *Git) Commit(message string) error {
 }
 
 // EnsureGitConfigOnce sets git user.name and user.email once per Git instance.
-func (g *Git) EnsureGitConfigOnce(configured *bool) error {
+func (g *Git) EnsureGitConfigOnce(ctx context.Context, configured *bool) error {
 	if *configured {
 		return nil
 	}
-	if err := g.ensureGitConfig(); err != nil {
+	if err := g.ensureGitConfig(ctx); err != nil {
 		return err
 	}
 	*configured = true
@@ -186,14 +178,14 @@ func (g *Git) EnsureGitConfigOnce(configured *bool) error {
 }
 
 // ensureGitConfig ensures that git user.name and user.email are configured
-func (g *Git) ensureGitConfig() error {
+func (g *Git) ensureGitConfig(ctx context.Context) error {
 	// Check if user.name is configured
-	if output, err := g.runGitCommand("config", "user.name"); err != nil || len(strings.TrimSpace(string(output))) == 0 {
+	if output, err := g.runGitCommand(ctx, shortTimeout, "config", "user.name"); err != nil || len(strings.TrimSpace(string(output))) == 0 {
 		if err != nil && errors.Is(err, context.DeadlineExceeded) {
 			return lnkerror.Wrap(ErrGitTimeout)
 		}
 		// Set a default user.name
-		_, err = g.runGitCommand("config", "user.name", "Lnk User")
+		_, err = g.runGitCommand(ctx, shortTimeout, "config", "user.name", "Lnk User")
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
 				return lnkerror.Wrap(ErrGitTimeout)
@@ -203,12 +195,12 @@ func (g *Git) ensureGitConfig() error {
 	}
 
 	// Check if user.email is configured
-	if output, err := g.runGitCommand("config", "user.email"); err != nil || len(strings.TrimSpace(string(output))) == 0 {
+	if output, err := g.runGitCommand(ctx, shortTimeout, "config", "user.email"); err != nil || len(strings.TrimSpace(string(output))) == 0 {
 		if err != nil && errors.Is(err, context.DeadlineExceeded) {
 			return lnkerror.Wrap(ErrGitTimeout)
 		}
 		// Set a default user.email
-		_, err = g.runGitCommand("config", "user.email", "lnk@localhost")
+		_, err = g.runGitCommand(ctx, shortTimeout, "config", "user.email", "lnk@localhost")
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
 				return lnkerror.Wrap(ErrGitTimeout)
@@ -221,12 +213,12 @@ func (g *Git) ensureGitConfig() error {
 }
 
 // getRemoteInfo returns information about the default remote.
-func (g *Git) getRemoteInfo() (string, error) {
+func (g *Git) getRemoteInfo(ctx context.Context) (string, error) {
 	// First try to get origin remote
-	url, err := g.getRemoteURL("origin")
+	url, err := g.getRemoteURL(ctx, "origin")
 	if err != nil {
 		// If origin doesn't exist, try to get any remote
-		output, err := g.runGitCommand("remote")
+		output, err := g.runGitCommand(ctx, shortTimeout, "remote")
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
 				return "", lnkerror.Wrap(ErrGitTimeout)
@@ -240,7 +232,7 @@ func (g *Git) getRemoteInfo() (string, error) {
 		}
 
 		// Use the first remote
-		url, err = g.getRemoteURL(remotes[0])
+		url, err = g.getRemoteURL(ctx, remotes[0])
 		if err != nil {
 			return "", lnkerror.WithPath(ErrNoRemote, remotes[0])
 		}
@@ -263,9 +255,9 @@ type StatusInfo struct {
 // GetStatus returns the repository status.
 // Output contains the full git status text (with color if requested).
 // When no remote is configured, Remote is empty and Ahead counts local commits.
-func (g *Git) GetStatus() (*StatusInfo, error) {
+func (g *Git) GetStatus(ctx context.Context) (*StatusInfo, error) {
 	// Get machine-readable dirty state
-	porcelain, err := g.runGitCommand("status", "--porcelain")
+	porcelain, err := g.runGitCommand(ctx, shortTimeout, "status", "--porcelain")
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			return nil, lnkerror.Wrap(ErrGitTimeout)
@@ -274,7 +266,7 @@ func (g *Git) GetStatus() (*StatusInfo, error) {
 	}
 
 	// Get human-readable output with color config
-	output, err := g.runGitCommand("status")
+	output, err := g.runGitCommand(ctx, shortTimeout, "status")
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			return nil, lnkerror.Wrap(ErrGitTimeout)
@@ -288,11 +280,11 @@ func (g *Git) GetStatus() (*StatusInfo, error) {
 	}
 
 	// Check if we have a remote
-	_, remoteErr := g.getRemoteInfo()
+	_, remoteErr := g.getRemoteInfo(ctx)
 	if remoteErr != nil {
 		if errors.Is(remoteErr, ErrNoRemote) {
 			// Local-only repo: count all commits, mark dirty from output
-			status.Ahead = g.getLocalCommitCount()
+			status.Ahead = g.getLocalCommitCount(ctx)
 			status.Behind = 0
 			status.Remote = ""
 			return status, nil
@@ -301,13 +293,13 @@ func (g *Git) GetStatus() (*StatusInfo, error) {
 	}
 
 	// Get upstream branch
-	upstreamOutput, err := g.runGitCommand("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+	upstreamOutput, err := g.runGitCommand(ctx, shortTimeout, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			return nil, lnkerror.Wrap(ErrGitTimeout)
 		}
 		// No upstream set
-		status.Ahead = g.getLocalCommitCount()
+		status.Ahead = g.getLocalCommitCount(ctx)
 		status.Behind = 0
 		status.Remote = "origin/main" // default assumption
 		return status, nil
@@ -315,8 +307,8 @@ func (g *Git) GetStatus() (*StatusInfo, error) {
 
 	remoteBranch := strings.TrimSpace(string(upstreamOutput))
 	status.Remote = remoteBranch
-	status.Ahead = g.getAheadCount(remoteBranch)
-	status.Behind = g.getBehindCount(remoteBranch)
+	status.Ahead = g.getAheadCount(ctx, remoteBranch)
+	status.Behind = g.getBehindCount(ctx, remoteBranch)
 
 	// Append ahead/behind summary to output for convenience
 	if status.Ahead > 0 || status.Behind > 0 {
@@ -328,8 +320,8 @@ func (g *Git) GetStatus() (*StatusInfo, error) {
 
 // getLocalCommitCount returns the total number of commits on HEAD, or 0 if
 // there are no commits yet (fresh repo).
-func (g *Git) getLocalCommitCount() int {
-	output, err := g.runGitCommand("rev-list", "--count", "HEAD")
+func (g *Git) getLocalCommitCount(ctx context.Context) int {
+	output, err := g.runGitCommand(ctx, shortTimeout, "rev-list", "--count", "HEAD")
 	if err != nil {
 		return 0
 	}
@@ -345,13 +337,13 @@ func (g *Git) getLocalCommitCount() int {
 }
 
 // getAheadCount returns how many commits ahead of remote
-func (g *Git) getAheadCount(remoteBranch string) int {
+func (g *Git) getAheadCount(ctx context.Context, remoteBranch string) int {
 	var output []byte
 
-	output, err := g.runGitCommand("rev-list", "--count", fmt.Sprintf("%s..HEAD", remoteBranch))
+	output, err := g.runGitCommand(ctx, shortTimeout, "rev-list", "--count", fmt.Sprintf("%s..HEAD", remoteBranch))
 	if err != nil {
 		// If remote branch doesn't exist, count all local commits
-		output, err = g.runGitCommand("rev-list", "--count", "HEAD")
+		output, err = g.runGitCommand(ctx, shortTimeout, "rev-list", "--count", "HEAD")
 		if err != nil {
 			return 0
 		}
@@ -369,8 +361,8 @@ func (g *Git) getAheadCount(remoteBranch string) int {
 }
 
 // getBehindCount returns how many commits behind remote
-func (g *Git) getBehindCount(remoteBranch string) int {
-	output, err := g.runGitCommand("rev-list", "--count", fmt.Sprintf("HEAD..%s", remoteBranch))
+func (g *Git) getBehindCount(ctx context.Context, remoteBranch string) int {
+	output, err := g.runGitCommand(ctx, shortTimeout, "rev-list", "--count", fmt.Sprintf("HEAD..%s", remoteBranch))
 	if err != nil {
 		return 0
 	}
@@ -386,9 +378,28 @@ func (g *Git) getBehindCount(remoteBranch string) int {
 	return n
 }
 
+// RmCached removes paths from the git index while preserving the working-tree
+// copies. When recursive is true, it passes -r to handle directories.
+func (g *Git) RmCached(ctx context.Context, paths []string, recursive bool) error {
+	args := []string{"rm", "--cached"}
+	if recursive {
+		args = append(args, "-r")
+	}
+	args = append(args, paths...)
+
+	_, err := g.runGitCommand(ctx, shortTimeout, args...)
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return lnkerror.Wrap(ErrGitTimeout)
+		}
+		return lnkerror.WithSuggestion(ErrGitCommand, "check file permissions and try again")
+	}
+	return nil
+}
+
 // HasChanges checks if there are uncommitted changes
-func (g *Git) HasChanges() (bool, error) {
-	output, err := g.runGitCommand("status", "--porcelain")
+func (g *Git) HasChanges(ctx context.Context) (bool, error) {
+	output, err := g.runGitCommand(ctx, shortTimeout, "status", "--porcelain")
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			return false, lnkerror.Wrap(ErrGitTimeout)
@@ -400,8 +411,8 @@ func (g *Git) HasChanges() (bool, error) {
 }
 
 // HasStagedChanges checks if there are staged changes
-func (g *Git) HasStagedChanges() (bool, error) {
-	output, err := g.runGitCommand("diff", "--cached", "--stat")
+func (g *Git) HasStagedChanges(ctx context.Context) (bool, error) {
+	output, err := g.runGitCommand(ctx, shortTimeout, "diff", "--cached", "--stat")
 	if err != nil {
 		return false, err
 	}
@@ -410,9 +421,9 @@ func (g *Git) HasStagedChanges() (bool, error) {
 
 // Diff returns the diff output for uncommitted changes in the repository.
 // If color is true, the output will include ANSI color codes.
-func (g *Git) Diff() (string, error) {
+func (g *Git) Diff(ctx context.Context) (string, error) {
 
-	output, err := g.runGitCommand("diff")
+	output, err := g.runGitCommand(ctx, shortTimeout, "diff")
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			return "", lnkerror.Wrap(ErrGitTimeout)
@@ -424,8 +435,8 @@ func (g *Git) Diff() (string, error) {
 }
 
 // AddAll stages all changes in the repository
-func (g *Git) AddAll() error {
-	_, err := g.runGitCommand("add", "-A")
+func (g *Git) AddAll(ctx context.Context) error {
+	_, err := g.runGitCommand(ctx, shortTimeout, "add", "-A")
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			return lnkerror.Wrap(ErrGitTimeout)
@@ -437,18 +448,17 @@ func (g *Git) AddAll() error {
 }
 
 // Push pushes changes to remote
-func (g *Git) Push() error {
+func (g *Git) Push(ctx context.Context) error {
 	// First ensure we have a remote configured
-	_, err := g.getRemoteInfo()
+	_, err := g.getRemoteInfo(ctx)
 	if err != nil {
 		return lnkerror.WithSuggestion(ErrPush, err.Error())
 	}
 
-	g = New(g.repoPath, WithLongTimeout())
 	// Explicit HEAD refspec: without it, push fails with exit 128 when the
 	// branch has no upstream (fresh init + remote add) on any git config
 	// lacking push.autoSetupRemote.
-	_, err = g.runGitCommand("push", "-u", "origin", "HEAD")
+	_, err = g.runGitCommand(ctx, longTimeout, "push", "-u", "origin", "HEAD")
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			return lnkerror.Wrap(ErrGitTimeout)
@@ -460,15 +470,14 @@ func (g *Git) Push() error {
 }
 
 // Pull pulls changes from remote
-func (g *Git) Pull() error {
+func (g *Git) Pull(ctx context.Context) error {
 	// First ensure we have a remote configured
-	_, err := g.getRemoteInfo()
+	_, err := g.getRemoteInfo(ctx)
 	if err != nil {
 		return lnkerror.WithSuggestion(ErrPull, err.Error())
 	}
 
-	g = New(g.repoPath, WithLongTimeout())
-	_, err = g.runGitCommand("pull", "origin")
+	_, err = g.runGitCommand(ctx, longTimeout, "pull", "origin")
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			return lnkerror.Wrap(ErrGitTimeout)
@@ -480,7 +489,7 @@ func (g *Git) Pull() error {
 }
 
 // Clone clones a repository from the given URL
-func (g *Git) Clone(url string) error {
+func (g *Git) Clone(ctx context.Context, url string) error {
 	// Remove the directory if it exists to ensure clean clone
 	if err := os.RemoveAll(g.repoPath); err != nil {
 		return lnkerror.WithPathAndSuggestion(ErrDirRemove, g.repoPath, err.Error())
@@ -495,7 +504,7 @@ func (g *Git) Clone(url string) error {
 	// Clone the repository
 	// Note: Can't use runGitCommand here because it sets cmd.Dir to g.repoPath,
 	// which doesn't exist yet. Clone needs to run from parent directory.
-	ctx, cancel := context.WithTimeout(context.Background(), longTimeout)
+	ctx, cancel := context.WithTimeout(ctx, longTimeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "git", "clone", url, g.repoPath)
@@ -508,19 +517,19 @@ func (g *Git) Clone(url string) error {
 	}
 
 	// Set up upstream tracking for main branch
-	_, err = g.runGitCommand("branch", "--set-upstream-to=origin/main", "main")
+	_, err = g.runGitCommand(ctx, shortTimeout, "branch", "--set-upstream-to=origin/main", "main")
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			return lnkerror.Wrap(ErrGitTimeout)
 		}
 		// If main doesn't exist, try master
-		_, err = g.runGitCommand("branch", "--set-upstream-to=origin/master", "master")
+		_, err = g.runGitCommand(ctx, shortTimeout, "branch", "--set-upstream-to=origin/master", "master")
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
 				return lnkerror.Wrap(ErrGitTimeout)
 			}
 			// If that also fails, try to set upstream for current branch
-			_, err = g.runGitCommand("branch", "--set-upstream-to=origin/HEAD")
+			_, err = g.runGitCommand(ctx, shortTimeout, "branch", "--set-upstream-to=origin/HEAD")
 			if err != nil {
 				return err
 			}

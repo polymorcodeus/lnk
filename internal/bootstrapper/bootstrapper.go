@@ -2,6 +2,7 @@
 package bootstrapper
 
 import (
+	"context"
 	"io"
 	"os"
 	"os/exec"
@@ -10,7 +11,7 @@ import (
 	"github.com/polymorcodeus/lnk/internal/lnkerror"
 )
 
-type commandRunner func(name string, arg ...string) *exec.Cmd
+type commandRunner func(ctx context.Context, name string, arg ...string) *exec.Cmd
 
 type gitChecker interface {
 	IsGitRepository() bool
@@ -28,7 +29,7 @@ func New(repoPath string, g gitChecker) *Runner {
 	return &Runner{
 		repoPath: repoPath,
 		git:      g,
-		runCmd:   exec.Command,
+		runCmd:   exec.CommandContext,
 	}
 }
 
@@ -47,13 +48,13 @@ func (r *Runner) FindScript() (string, error) {
 }
 
 // RunScript executes the bootstrap script with configurable I/O.
-func (r *Runner) RunScript(scriptName string, stdout, stderr io.Writer, stdin io.Reader) error {
+func (r *Runner) RunScript(ctx context.Context, scriptName string, stdout, stderr io.Writer, stdin io.Reader) error {
 	scriptPath := filepath.Join(r.repoPath, scriptName)
 	if err := os.Chmod(scriptPath, 0o755); err != nil {
 		return lnkerror.Wrap(lnkerror.ErrBootstrapPerms)
 	}
 
-	cmd := r.runCmd("bash", scriptPath)
+	cmd := r.runCmd(ctx, "bash", scriptPath)
 	cmd.Dir = r.repoPath
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr

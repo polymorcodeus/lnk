@@ -36,18 +36,13 @@ func (s *Service) Remove(ctx context.Context, host, input string) error {
 		return err
 	}
 
-	removeArgs := []string{"rm", "--cached"}
-	if removeResult.IsDir {
-		removeArgs = append(removeArgs, "-r")
-	}
-	removeArgs = append(removeArgs, removeResult.RemovePaths...)
-	if err := s.execGit(ctx, removeArgs...); err != nil {
+	if err := s.git.RmCached(ctx, removeResult.RemovePaths, removeResult.IsDir); err != nil {
 		return err
 	}
-	if err := s.stagePaths(removeResult.StagePaths...); err != nil {
+	if err := s.stagePaths(ctx, removeResult.StagePaths...); err != nil {
 		return err
 	}
-	if err := s.commit(fmt.Sprintf("lnk: removed from %s\n%s", host, input)); err != nil {
+	if err := s.commit(ctx, fmt.Sprintf("lnk: removed from %s\n%s", host, input)); err != nil {
 		return err
 	}
 
@@ -97,8 +92,8 @@ func (s *Service) Forget(ctx context.Context, host, input string) error {
 	if err != nil {
 		return err
 	}
-	if err := s.stagePaths(lnkFileName); err != nil {
+	if err := s.stagePaths(ctx, lnkFileName); err != nil {
 		return err
 	}
-	return s.commit(fmt.Sprintf("lnk: forgot %s", filepath.Base(file.RelativePath)))
+	return s.commit(ctx, fmt.Sprintf("lnk: forgot %s", filepath.Base(file.RelativePath)))
 }
