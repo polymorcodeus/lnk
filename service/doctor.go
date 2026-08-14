@@ -15,70 +15,30 @@ import (
 	"github.com/polymorcodeus/lnk/internal/tracker"
 )
 
-// ScopeDoctorResult captures doctor findings for one profile or storage scope.
-type ScopeDoctorResult interface {
-	scopeDoctorResult()
-	ResultName() string
-	HasIssues() bool
-	Print(w io.Writer) error
+// ScopeResult captures doctor findings for one profile or storage scope.
+type ScopeResult struct {
+	Name  string
+	Label string
+	Items []string
 }
-
-type InvalidEntriesResult struct {
-	Name           string
-	InvalidEntries []string
-}
-
-type BrokenSymlinksResult struct {
-	Name           string
-	BrokenSymlinks []string
-}
-
-// scopeDoctorResult marks the type as implementing ScopeDoctorResult.
-func (r InvalidEntriesResult) scopeDoctorResult() {}
-
-// scopeDoctorResult marks the type as implementing ScopeDoctorResult.
-func (r BrokenSymlinksResult) scopeDoctorResult() {}
 
 // ResultName returns the display name for this result.
-func (r InvalidEntriesResult) ResultName() string { return r.Name }
+func (r ScopeResult) ResultName() string { return r.Name }
 
-// ResultName returns the display name for this result.
-func (r BrokenSymlinksResult) ResultName() string { return r.Name }
+// HasIssues reports whether any items were found.
+func (r ScopeResult) HasIssues() bool { return len(r.Items) > 0 }
 
-// HasIssues reports whether invalid entries were found.
-func (r InvalidEntriesResult) HasIssues() bool { return len(r.InvalidEntries) > 0 }
-
-// HasIssues reports whether broken symlinks were found.
-func (r BrokenSymlinksResult) HasIssues() bool { return len(r.BrokenSymlinks) > 0 }
-
-// Print writes a human-readable summary of invalid entries to w.
-func (r InvalidEntriesResult) Print(w io.Writer) error {
+// Print writes a human-readable summary of items to w.
+func (r ScopeResult) Print(w io.Writer) error {
 	if _, err := fmt.Fprintf(w, "%s:\n", r.Name); err != nil {
 		return err
 	}
-	if len(r.InvalidEntries) == 0 {
+	if len(r.Items) == 0 {
 		_, err := fmt.Fprintln(w, "  ok")
 		return err
 	}
-	for _, item := range r.InvalidEntries {
-		if _, err := fmt.Fprintf(w, "  invalid: %s\n", item); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// Print writes a human-readable summary of broken symlinks to w.
-func (r BrokenSymlinksResult) Print(w io.Writer) error {
-	if _, err := fmt.Fprintf(w, "%s:\n", r.Name); err != nil {
-		return err
-	}
-	if len(r.BrokenSymlinks) == 0 {
-		_, err := fmt.Fprintln(w, "  ok")
-		return err
-	}
-	for _, item := range r.BrokenSymlinks {
-		if _, err := fmt.Fprintf(w, "  broken: %s\n", item); err != nil {
+	for _, item := range r.Items {
+		if _, err := fmt.Fprintf(w, "  %s: %s\n", r.Label, item); err != nil {
 			return err
 		}
 	}
@@ -88,7 +48,7 @@ func (r BrokenSymlinksResult) Print(w io.Writer) error {
 // DoctorReport captures read-only or fix-mode doctor results.
 type DoctorReport struct {
 	Mode                    string
-	ScopeResults            []ScopeDoctorResult
+	ScopeResults            []ScopeResult
 	Collisions              []OwnershipCollision
 	MarkerMissing           bool
 	MarkerFixed             bool
@@ -169,9 +129,10 @@ func (s *Service) doctorScan(host string, all bool) (DoctorReport, error) {
 		if err != nil {
 			return DoctorReport{}, err
 		}
-		report.ScopeResults = append(report.ScopeResults, InvalidEntriesResult{
-			Name:           scope,
-			InvalidEntries: result,
+		report.ScopeResults = append(report.ScopeResults, ScopeResult{
+			Name:  scope,
+			Label: "invalid",
+			Items: result,
 		})
 	}
 
@@ -180,9 +141,10 @@ func (s *Service) doctorScan(host string, all bool) (DoctorReport, error) {
 		if err != nil {
 			return DoctorReport{}, err
 		}
-		report.ScopeResults = append(report.ScopeResults, BrokenSymlinksResult{
-			Name:           profileName(host),
-			BrokenSymlinks: broken,
+		report.ScopeResults = append(report.ScopeResults, ScopeResult{
+			Name:  profileName(host),
+			Label: "broken",
+			Items: broken,
 		})
 	}
 
@@ -208,11 +170,10 @@ func (s *Service) doctorFix(ctx context.Context, host string, all, pruneEmpty bo
 	}
 
 	for _, result := range report.ScopeResults {
-		entries, ok := result.(InvalidEntriesResult)
-		if !ok || len(entries.InvalidEntries) == 0 {
+		if result.Label != "invalid" || len(result.Items) == 0 {
 			continue
 		}
-		scope := entries.Name
+		scope := result.Name
 		format, err := s.getFormat()
 		if err != nil {
 			return DoctorReport{}, err
@@ -223,7 +184,7 @@ func (s *Service) doctorFix(ctx context.Context, host string, all, pruneEmpty bo
 			return DoctorReport{}, err
 		}
 		filtered := slices.DeleteFunc(slices.Clone(items), func(item string) bool {
-			return slices.Contains(entries.InvalidEntries, item)
+			return slices.Contains(result.Items, item)
 		})
 		if err := tr.WriteManagedItems(filtered); err != nil {
 			return DoctorReport{}, err
