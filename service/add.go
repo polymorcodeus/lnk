@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/polymorcodeus/lnk/internal/filemanager"
+	"github.com/polymorcodeus/lnk/internal/lnkerror"
 )
 
 // Add tracks one or more paths in common or one host scope.
@@ -35,7 +36,7 @@ func (s *Service) Add(ctx context.Context, host string, paths []string) error {
 			return err
 		}
 		if owner != nil {
-			return fmt.Errorf("path already managed in scope %s: %s", owner.Host, file.RelativePath)
+			return lnkerror.WithPathAndSuggestion(lnkerror.ErrAlreadyManaged, file.RelativePath, fmt.Sprintf("already managed in scope %s", owner.Host))
 		}
 
 		files = append(files, filemanager.FileToTrack{

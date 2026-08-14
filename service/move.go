@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	fspkg "github.com/polymorcodeus/lnk/internal/fs"
+	"github.com/polymorcodeus/lnk/internal/lnkerror"
 	"github.com/polymorcodeus/lnk/internal/tracker"
 )
 
@@ -39,7 +40,7 @@ func (s *Service) Move(ctx context.Context, input string, toHost string, toCommo
 	}
 
 	if owner.Host == targetHost {
-		return fmt.Errorf("path is already managed in scope %s: %s", owner.Host, file.RelativePath)
+		return lnkerror.WithPathAndSuggestion(lnkerror.ErrAlreadyManaged, file.RelativePath, fmt.Sprintf("already managed in scope %s", owner.Host))
 	}
 
 	otherOwner, err := s.findOwnerInScope(file.RelativePath, targetHost)

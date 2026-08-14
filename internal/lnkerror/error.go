@@ -5,14 +5,12 @@ import "errors"
 
 // Sentinel errors for lnk operations.
 var (
-	ErrManagedFilesExist = errors.New("directory already contains managed files")
-	ErrGitRepoExists     = errors.New("directory contains an existing Git repository")
-	ErrAlreadyManaged    = errors.New("file is already managed by lnk")
-	ErrNotManaged        = errors.New("file is not managed by lnk")
-	ErrNotInitialized    = errors.New("lnk repository not initialized")
-	ErrBootstrapNotFound = errors.New("bootstrap script not found")
-	ErrBootstrapFailed   = errors.New("bootstrap script failed with error")
-	ErrBootstrapPerms    = errors.New("failed to make bootstrap script executable")
+	ErrGitRepoExists   = errors.New("directory contains an existing Git repository")
+	ErrAlreadyManaged  = errors.New("file is already managed by lnk")
+	ErrNotManaged      = errors.New("file is not managed by lnk")
+	ErrNotInitialized  = errors.New("lnk repository not initialized")
+	ErrBootstrapFailed = errors.New("bootstrap script failed with error")
+	ErrBootstrapPerms  = errors.New("failed to make bootstrap script executable")
 )
 
 // Error wraps a sentinel error with optional context for display.

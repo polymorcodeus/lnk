@@ -14,12 +14,10 @@ func TestSentinels(t *testing.T) {
 		name string
 		err  error
 	}{
-		{"ErrManagedFilesExist", lnkerror.ErrManagedFilesExist},
 		{"ErrGitRepoExists", lnkerror.ErrGitRepoExists},
 		{"ErrAlreadyManaged", lnkerror.ErrAlreadyManaged},
 		{"ErrNotManaged", lnkerror.ErrNotManaged},
 		{"ErrNotInitialized", lnkerror.ErrNotInitialized},
-		{"ErrBootstrapNotFound", lnkerror.ErrBootstrapNotFound},
 		{"ErrBootstrapFailed", lnkerror.ErrBootstrapFailed},
 		{"ErrBootstrapPerms", lnkerror.ErrBootstrapPerms},
 	}

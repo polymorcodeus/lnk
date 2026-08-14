@@ -2,12 +2,14 @@ package service_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/polymorcodeus/lnk/internal/lnkerror"
 	"github.com/polymorcodeus/lnk/internal/testhelpers"
 )
 
@@ -137,8 +139,8 @@ func TestAdd_AlreadyManaged(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error adding already-managed path, got nil")
 	}
-	if !strings.Contains(err.Error(), "already managed") {
-		t.Errorf("error = %q, want mention of already managed", err.Error())
+	if !errors.Is(err, lnkerror.ErrAlreadyManaged) {
+		t.Errorf("error = %v, want %v", err, lnkerror.ErrAlreadyManaged)
 	}
 }
 
@@ -255,8 +257,8 @@ func TestAdd_HostScope_SamePathInDifferentScopes(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error adding already-managed path to a different scope, got nil")
 	}
-	if !strings.Contains(err.Error(), "already managed") {
-		t.Errorf("error = %q, want mention of already managed", err.Error())
+	if !errors.Is(err, lnkerror.ErrAlreadyManaged) {
+		t.Errorf("error = %v, want %v", err, lnkerror.ErrAlreadyManaged)
 	}
 }
 
