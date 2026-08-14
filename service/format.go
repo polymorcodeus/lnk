@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	fspkg "github.com/polymorcodeus/lnk/internal/fs"
+	"github.com/polymorcodeus/lnk/internal/lnkerror"
 	"github.com/polymorcodeus/lnk/internal/tracker"
 )
 
@@ -25,7 +26,7 @@ func (s *Service) Format(ctx context.Context, ver1, ver2 bool) (string, error) {
 		return "", err
 	}
 	if ver1 && ver2 {
-		return "", fmt.Errorf("ver1 and ver2 cannot both be passed")
+		return "", lnkerror.Wrap(lnkerror.ErrInvalidFlags)
 	}
 
 	repoVer, err := s.FindVersion()

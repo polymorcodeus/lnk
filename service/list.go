@@ -2,8 +2,8 @@ package service
 
 import (
 	"context"
-	"fmt"
 
+	"github.com/polymorcodeus/lnk/internal/lnkerror"
 	"github.com/polymorcodeus/lnk/internal/tracker"
 )
 
@@ -13,7 +13,7 @@ func (s *Service) List(ctx context.Context, host string, all bool) (ListResult, 
 		return ListResult{}, err
 	}
 	if all && host != "" {
-		return ListResult{}, fmt.Errorf("--host and --all cannot be combined")
+		return ListResult{}, lnkerror.Wrap(lnkerror.ErrInvalidFlags)
 	}
 
 	var scopes []string

@@ -15,7 +15,7 @@ func (s *Service) Add(ctx context.Context, host string, paths []string) error {
 		return err
 	}
 	if len(paths) == 0 {
-		return fmt.Errorf("no paths provided")
+		return lnkerror.Wrap(lnkerror.ErrNoPaths)
 	}
 
 	var files []filemanager.FileToTrack
@@ -27,7 +27,7 @@ func (s *Service) Add(ctx context.Context, host string, paths []string) error {
 			return err
 		}
 		if _, ok := seen[file.RelativePath]; ok {
-			return fmt.Errorf("duplicate path in one add invocation: %s", file.RelativePath)
+			return lnkerror.WithPath(lnkerror.ErrDuplicatePath, file.RelativePath)
 		}
 		seen[file.RelativePath] = struct{}{}
 

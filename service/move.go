@@ -21,7 +21,7 @@ func (s *Service) Move(ctx context.Context, input string, toHost string, toCommo
 		return err
 	}
 	if (toCommon && toHost != "") || (!toCommon && toHost == "") {
-		return fmt.Errorf("exactly one of --to-common or --to-host must be set")
+		return lnkerror.Wrap(lnkerror.ErrInvalidFlags)
 	}
 
 	owner, err := s.findOwner(file.RelativePath)
@@ -29,7 +29,7 @@ func (s *Service) Move(ctx context.Context, input string, toHost string, toCommo
 		return err
 	}
 	if owner == nil {
-		return fmt.Errorf("path is not managed: %s", file.RelativePath)
+		return lnkerror.WithPath(lnkerror.ErrNotManaged, file.RelativePath)
 	}
 
 	var targetHost string
@@ -48,7 +48,7 @@ func (s *Service) Move(ctx context.Context, input string, toHost string, toCommo
 		return err
 	}
 	if otherOwner != nil {
-		return fmt.Errorf("target scope already owns path %s", file.RelativePath)
+		return lnkerror.WithPath(lnkerror.ErrAlreadyManaged, file.RelativePath)
 	}
 
 	format, err := s.getFormat()

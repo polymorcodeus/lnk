@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	fspkg "github.com/polymorcodeus/lnk/internal/fs"
+	"github.com/polymorcodeus/lnk/internal/lnkerror"
 )
 
 // Restore applies the effective machine profile: common only, or common + host.
@@ -20,7 +21,7 @@ func (s *Service) Restore(ctx context.Context, host string, dryRun bool) (Restor
 		return RestoreInfo{}, err
 	}
 	if len(collisions) > 0 {
-		return RestoreInfo{}, fmt.Errorf("restore blocked by duplicate ownership; run 'lnk doctor' first")
+		return RestoreInfo{}, lnkerror.WithSuggestion(lnkerror.ErrDuplicateOwnership, "run 'lnk doctor' first")
 	}
 
 	host = NormalizeHost(host)
@@ -45,7 +46,7 @@ func (s *Service) Restore(ctx context.Context, host string, dryRun bool) (Restor
 				if !dryRun {
 					backupPath := item.LivePath + ".lnk-backup"
 					if _, err := os.Lstat(backupPath); err == nil {
-						return RestoreInfo{}, fmt.Errorf("backup path already exists: %s", backupPath)
+						return RestoreInfo{}, lnkerror.WithPath(lnkerror.ErrBackupExists, backupPath)
 					}
 					if err := os.Rename(item.LivePath, backupPath); err != nil {
 						return RestoreInfo{}, fmt.Errorf("backup existing file %s: %w", item.LivePath, err)

@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/polymorcodeus/lnk/internal/fs"
+	"github.com/polymorcodeus/lnk/internal/lnkerror"
 	"github.com/polymorcodeus/lnk/internal/tracker"
 )
 
@@ -116,7 +117,7 @@ func (s *Service) Doctor(ctx context.Context, host string, all, fix, pruneEmpty 
 		return DoctorReport{}, err
 	}
 	if all && host != "" {
-		return DoctorReport{}, fmt.Errorf("host and all cannot be combined")
+		return DoctorReport{}, lnkerror.Wrap(lnkerror.ErrInvalidFlags)
 	}
 
 	if fix {
@@ -125,7 +126,7 @@ func (s *Service) Doctor(ctx context.Context, host string, all, fix, pruneEmpty 
 			return DoctorReport{}, err
 		}
 		if dirty {
-			return DoctorReport{}, fmt.Errorf("uncommitted changes detected. Run 'lnk commit' before using --fix")
+			return DoctorReport{}, lnkerror.WithSuggestion(lnkerror.ErrDirtyTree, "run 'lnk commit' before using --fix")
 		}
 	}
 

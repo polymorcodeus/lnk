@@ -2,12 +2,14 @@ package service_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/polymorcodeus/lnk/internal/lnkerror"
 	"github.com/polymorcodeus/lnk/internal/testhelpers"
 	"github.com/polymorcodeus/lnk/service"
 )
@@ -84,8 +86,8 @@ func TestCommit_NoChanges(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when no changes to commit, got nil")
 	}
-	if !strings.Contains(err.Error(), "no changes") {
-		t.Errorf("error = %q, want mention of no changes", err.Error())
+	if !errors.Is(err, lnkerror.ErrNoChanges) {
+		t.Errorf("error = %v, want %v", err, lnkerror.ErrNoChanges)
 	}
 }
 
@@ -304,8 +306,8 @@ func TestPush_DirtyRepo(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error pushing with dirty working tree, got nil")
 	}
-	if !strings.Contains(err.Error(), "dirty") {
-		t.Errorf("error = %q, want mention of dirty", err.Error())
+	if !errors.Is(err, lnkerror.ErrDirtyTree) {
+		t.Errorf("error = %v, want %v", err, lnkerror.ErrDirtyTree)
 	}
 }
 

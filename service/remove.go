@@ -8,6 +8,7 @@ import (
 	"slices"
 
 	"github.com/polymorcodeus/lnk/internal/filemanager"
+	"github.com/polymorcodeus/lnk/internal/lnkerror"
 	"github.com/polymorcodeus/lnk/internal/tracker"
 )
 
@@ -71,7 +72,7 @@ func (s *Service) Forget(ctx context.Context, host, input string) error {
 		return fmt.Errorf("read tracked items: %w", err)
 	}
 	if !slices.Contains(items, file.RelativePath) {
-		return fmt.Errorf("path is not managed in scope %s: %s", resolvedHost, file.RelativePath)
+		return lnkerror.WithPath(lnkerror.ErrNotManaged, file.RelativePath)
 	}
 
 	hostPath, err := tr.HostStoragePath()

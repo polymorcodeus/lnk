@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/polymorcodeus/lnk/internal/lnkerror"
@@ -120,8 +119,8 @@ func TestAdd_DuplicateInSameCall(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for duplicate path in same call, got nil")
 	}
-	if !strings.Contains(err.Error(), "duplicate") {
-		t.Errorf("error = %q, want mention of duplicate", err.Error())
+	if !errors.Is(err, lnkerror.ErrDuplicatePath) {
+		t.Errorf("error = %v, want %v", err, lnkerror.ErrDuplicatePath)
 	}
 }
 
@@ -156,8 +155,8 @@ func TestAdd_PathOutsideHome(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for path outside $HOME, got nil")
 	}
-	if !strings.Contains(err.Error(), "$HOME") {
-		t.Errorf("error = %q, want mention of $HOME", err.Error())
+	if !errors.Is(err, lnkerror.ErrNotInHome) {
+		t.Errorf("error = %v, want %v", err, lnkerror.ErrNotInHome)
 	}
 }
 

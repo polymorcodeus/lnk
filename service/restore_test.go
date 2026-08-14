@@ -2,11 +2,12 @@ package service_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
+	"github.com/polymorcodeus/lnk/internal/lnkerror"
 	"github.com/polymorcodeus/lnk/internal/testhelpers"
 )
 
@@ -190,8 +191,8 @@ func TestRestore_BackupPathAlreadyExists(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when backup path already exists, got nil")
 	}
-	if !strings.Contains(err.Error(), "backup path already exists") {
-		t.Errorf("error = %q, want mention of backup path already exists", err.Error())
+	if !errors.Is(err, lnkerror.ErrBackupExists) {
+		t.Errorf("error = %v, want %v", err, lnkerror.ErrBackupExists)
 	}
 
 	// Existing backup should be untouched.
@@ -324,8 +325,8 @@ func TestRestore_BlockedByCollision(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when ownership collision exists, got nil")
 	}
-	if !strings.Contains(err.Error(), "collision") && !strings.Contains(err.Error(), "duplicate") {
-		t.Errorf("error = %q, want mention of collision or duplicate", err.Error())
+	if !errors.Is(err, lnkerror.ErrDuplicateOwnership) {
+		t.Errorf("error = %v, want %v", err, lnkerror.ErrDuplicateOwnership)
 	}
 }
 
