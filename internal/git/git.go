@@ -531,7 +531,7 @@ func (g *Git) Clone(ctx context.Context, url string) error {
 			// If that also fails, try to set upstream for current branch
 			_, err = g.runGitCommand(ctx, shortTimeout, "branch", "--set-upstream-to=origin/HEAD")
 			if err != nil {
-				return err
+				return lnkerror.Wrap(ErrGitCommand)
 			}
 		}
 	}

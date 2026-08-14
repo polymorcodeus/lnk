@@ -14,6 +14,7 @@ import (
 	filemgr "github.com/polymorcodeus/lnk/internal/filemanager"
 	fspkg "github.com/polymorcodeus/lnk/internal/fs"
 	gitpkg "github.com/polymorcodeus/lnk/internal/git"
+	"github.com/polymorcodeus/lnk/internal/lnkerror"
 	"github.com/polymorcodeus/lnk/internal/tracker"
 )
 
@@ -148,7 +149,7 @@ func (s *Service) commit(ctx context.Context, message string) error {
 // requireGitRepo returns an error if the configured path is not a git repository.
 func (s *Service) requireGitRepo() error {
 	if !s.git.IsGitRepository() {
-		return fmt.Errorf("lnk repository not initialized: run 'lnk init' first")
+		return lnkerror.WithSuggestion(lnkerror.ErrNotInitialized, "run 'lnk init' first")
 	}
 	return nil
 }
@@ -232,7 +233,7 @@ func (s *Service) resolveRemovalScope(input, host string) (string, homePath, err
 			return "", homePath{}, ownerErr
 		}
 		if owner == nil {
-			return "", homePath{}, fmt.Errorf("path is not managed in scope %s: %s", host, file.RelativePath)
+			return "", homePath{}, lnkerror.WithPathAndSuggestion(lnkerror.ErrNotManaged, file.RelativePath, fmt.Sprintf("not managed in scope %s", host))
 		}
 		return host, file, nil
 	}
@@ -242,10 +243,10 @@ func (s *Service) resolveRemovalScope(input, host string) (string, homePath, err
 		return "", homePath{}, ownerErr
 	}
 	if owner == nil {
-		return "", homePath{}, fmt.Errorf("path is not managed: %s", file.RelativePath)
+		return "", homePath{}, lnkerror.WithPath(lnkerror.ErrNotManaged, file.RelativePath)
 	}
 	if owner.Host != tracker.CommonScope {
-		return "", homePath{}, fmt.Errorf("path is managed in host scope %s; use --host %s", owner.Host, owner.Host)
+		return "", homePath{}, lnkerror.WithPathAndSuggestion(lnkerror.ErrAlreadyManaged, file.RelativePath, fmt.Sprintf("use --host %s", owner.Host))
 	}
 	return tracker.CommonScope, file, nil
 }
@@ -338,7 +339,7 @@ func homeRelativePath(input string) (homePath, error) {
 	}
 	cleaned := filepath.Clean(relativePath)
 	if cleaned == "." || strings.HasPrefix(cleaned, "..") || filepath.IsAbs(cleaned) {
-		return homePath{}, fmt.Errorf("path must be inside $HOME: %s", input)
+		return homePath{}, lnkerror.WithPath(lnkerror.ErrNotInHome, input)
 	}
 	file := homePath{
 		RelativePath: cleaned,
@@ -402,7 +403,7 @@ func (s *Service) profileItems(host string) ([]profileItem, error) {
 		}
 		for _, relativePath := range managedItems {
 			if _, ok := seen[relativePath]; ok {
-				return nil, fmt.Errorf("profile contains duplicate ownership for %s", relativePath)
+				return nil, lnkerror.WithPath(lnkerror.ErrDuplicateOwnership, relativePath)
 			}
 			seen[relativePath] = struct{}{}
 			hostPath, err := tr.HostStoragePath()

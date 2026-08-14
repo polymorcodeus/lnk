@@ -2,12 +2,14 @@ package service_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/polymorcodeus/lnk/internal/lnkerror"
 	"github.com/polymorcodeus/lnk/internal/testhelpers"
 	"github.com/polymorcodeus/lnk/service"
 )
@@ -70,8 +72,8 @@ func TestInit_ExistingGitRepoWithoutMarker(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for existing git repo without lnk marker, got nil")
 	}
-	if !strings.Contains(err.Error(), "existing Git repository") {
-		t.Errorf("error = %q, want mention of existing Git repository", err.Error())
+	if !errors.Is(err, lnkerror.ErrGitRepoExists) {
+		t.Errorf("error = %v, want %v", err, lnkerror.ErrGitRepoExists)
 	}
 }
 

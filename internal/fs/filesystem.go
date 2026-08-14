@@ -14,11 +14,11 @@ import (
 // Sentinel errors for file system operations.
 var (
 	ErrFileNotExists   = errors.New("file or directory not found")
-	ErrFileCheck       = errors.New("unable to access file please check file permissions and try again")
+	ErrFileCheck       = errors.New("unable to access file")
 	ErrUnsupportedType = errors.New("cannot manage this type of file")
-	ErrSymlinkRead     = errors.New("unable to read symlink the file may be corrupted or have invalid permissions")
-	ErrDirCreate       = errors.New("failed to create directory please check permissions and available disk space")
-	ErrRelativePath    = errors.New("unable to create symlink due to path configuration issues please check file locations")
+	ErrSymlinkRead     = errors.New("unable to read symlink")
+	ErrDirCreate       = errors.New("failed to create directory")
+	ErrRelativePath    = errors.New("unable to create symlink")
 )
 
 // FileSystem handles file system operations
@@ -32,7 +32,7 @@ func (fs *FileSystem) ValidateFileInfoForAdd(filePath string) (os.FileInfo, erro
 			return nil, lnkerror.WithPath(ErrFileNotExists, filePath)
 		}
 
-		return nil, lnkerror.WithPath(ErrFileCheck, filePath)
+		return nil, lnkerror.WithPathAndSuggestion(ErrFileCheck, filePath, "check file permissions and try again")
 	}
 
 	// Reject symlinks explicitly
@@ -55,7 +55,7 @@ func (fs *FileSystem) ValidateSymlinkForRemove(filePath, repoPath string) error 
 			return lnkerror.WithPath(ErrFileNotExists, filePath)
 		}
 
-		return lnkerror.WithPath(ErrFileCheck, filePath)
+		return lnkerror.WithPathAndSuggestion(ErrFileCheck, filePath, "check file permissions and try again")
 	}
 
 	if info.Mode()&os.ModeSymlink == 0 {
@@ -64,7 +64,7 @@ func (fs *FileSystem) ValidateSymlinkForRemove(filePath, repoPath string) error 
 
 	target, err := os.Readlink(filePath)
 	if err != nil {
-		return lnkerror.WithPath(ErrSymlinkRead, filePath)
+		return lnkerror.WithPathAndSuggestion(ErrSymlinkRead, filePath, "the file may be corrupted or have invalid permissions")
 	}
 
 	if !filepath.IsAbs(target) {
@@ -92,7 +92,7 @@ func (fs *FileSystem) Move(src, dst string, info os.FileInfo) error {
 // MoveFile moves a file from source to destination
 func (fs *FileSystem) MoveFile(src, dst string) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return lnkerror.WithPath(ErrDirCreate, filepath.Dir(dst))
+		return lnkerror.WithPathAndSuggestion(ErrDirCreate, filepath.Dir(dst), "check permissions and available disk space")
 	}
 
 	return os.Rename(src, dst)
@@ -102,7 +102,7 @@ func (fs *FileSystem) MoveFile(src, dst string) error {
 func (fs *FileSystem) CreateSymlink(target, linkPath string) error {
 	relTarget, err := filepath.Rel(filepath.Dir(linkPath), target)
 	if err != nil {
-		return lnkerror.Wrap(ErrRelativePath)
+		return lnkerror.WithSuggestion(ErrRelativePath, "check file locations")
 	}
 
 	return os.Symlink(relTarget, linkPath)
@@ -111,7 +111,7 @@ func (fs *FileSystem) CreateSymlink(target, linkPath string) error {
 // MoveDirectory moves a directory from source to destination recursively
 func (fs *FileSystem) MoveDirectory(src, dst string) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return lnkerror.WithPath(ErrDirCreate, filepath.Dir(dst))
+		return lnkerror.WithPathAndSuggestion(ErrDirCreate, filepath.Dir(dst), "check permissions and available disk space")
 	}
 
 	return os.Rename(src, dst)

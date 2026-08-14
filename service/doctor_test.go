@@ -118,7 +118,7 @@ func TestDoctor_BrokenSymlink_SymlinkRemoved(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Error("expected BrokenSymlinksResult with issues")
+		t.Error("expected ScopeResult with broken label and issues")
 	}
 }
 
@@ -188,15 +188,12 @@ func TestDoctor_AllScope_ScansAllScopesInOrder(t *testing.T) {
 		t.Fatalf("Doctor --all: %v", err)
 	}
 
-	// ScopeResults contains InvalidEntriesResult for each scope plus
-	// BrokenSymlinksResult — with --all, broken symlink check is skipped.
-	// Expect common, ahost, zhost in that order (common first, hosts alphabetical).
+	// ScopeResults contains one result per scope — with --all, broken symlink
+	// check is skipped. Expect common, ahost, zhost in that order (common
+	// first, hosts alphabetical).
 	var scopeNames []string
 	for _, result := range report.ScopeResults {
-		// Only collect InvalidEntriesResult names to check scope ordering.
-		if _, ok := result.(interface{ ResultName() string }); ok {
-			scopeNames = append(scopeNames, result.ResultName())
-		}
+		scopeNames = append(scopeNames, result.Name)
 	}
 
 	if len(scopeNames) < 3 {

@@ -2,9 +2,9 @@ package service
 
 import (
 	"context"
-	"fmt"
 
 	gitpkg "github.com/polymorcodeus/lnk/internal/git"
+	"github.com/polymorcodeus/lnk/internal/lnkerror"
 )
 
 // Commit stages all repo changes and creates a commit.
@@ -20,7 +20,7 @@ func (s *Service) Commit(ctx context.Context, message string) error {
 		return err
 	}
 	if !hasChanges {
-		return fmt.Errorf("no changes to commit")
+		return lnkerror.Wrap(lnkerror.ErrNoChanges)
 	}
 	if err := s.git.AddAll(ctx); err != nil {
 		return err
@@ -38,7 +38,7 @@ func (s *Service) Push(ctx context.Context) error {
 		return err
 	}
 	if hasChanges {
-		return fmt.Errorf("working tree is dirty; run 'lnk commit' or commit manually before push")
+		return lnkerror.WithSuggestion(lnkerror.ErrDirtyTree, "run 'lnk commit' or commit manually before push")
 	}
 	return s.git.Push(ctx)
 }

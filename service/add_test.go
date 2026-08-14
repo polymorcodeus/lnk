@@ -2,12 +2,13 @@ package service_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 
+	"github.com/polymorcodeus/lnk/internal/lnkerror"
 	"github.com/polymorcodeus/lnk/internal/testhelpers"
 )
 
@@ -118,8 +119,8 @@ func TestAdd_DuplicateInSameCall(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for duplicate path in same call, got nil")
 	}
-	if !strings.Contains(err.Error(), "duplicate") {
-		t.Errorf("error = %q, want mention of duplicate", err.Error())
+	if !errors.Is(err, lnkerror.ErrDuplicatePath) {
+		t.Errorf("error = %v, want %v", err, lnkerror.ErrDuplicatePath)
 	}
 }
 
@@ -137,8 +138,8 @@ func TestAdd_AlreadyManaged(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error adding already-managed path, got nil")
 	}
-	if !strings.Contains(err.Error(), "already managed") {
-		t.Errorf("error = %q, want mention of already managed", err.Error())
+	if !errors.Is(err, lnkerror.ErrAlreadyManaged) {
+		t.Errorf("error = %v, want %v", err, lnkerror.ErrAlreadyManaged)
 	}
 }
 
@@ -154,8 +155,8 @@ func TestAdd_PathOutsideHome(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for path outside $HOME, got nil")
 	}
-	if !strings.Contains(err.Error(), "$HOME") {
-		t.Errorf("error = %q, want mention of $HOME", err.Error())
+	if !errors.Is(err, lnkerror.ErrNotInHome) {
+		t.Errorf("error = %v, want %v", err, lnkerror.ErrNotInHome)
 	}
 }
 
@@ -255,8 +256,8 @@ func TestAdd_HostScope_SamePathInDifferentScopes(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error adding already-managed path to a different scope, got nil")
 	}
-	if !strings.Contains(err.Error(), "already managed") {
-		t.Errorf("error = %q, want mention of already managed", err.Error())
+	if !errors.Is(err, lnkerror.ErrAlreadyManaged) {
+		t.Errorf("error = %v, want %v", err, lnkerror.ErrAlreadyManaged)
 	}
 }
 

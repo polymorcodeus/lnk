@@ -2,12 +2,14 @@ package service_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/polymorcodeus/lnk/internal/lnkerror"
 	"github.com/polymorcodeus/lnk/internal/testhelpers"
 )
 
@@ -554,8 +556,8 @@ func TestRemove_HostScopedFile_WithEmptyHost(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error removing host-scoped file without --host, got nil")
 	}
-	if !strings.Contains(err.Error(), "--host") {
-		t.Errorf("error = %q, want mention of --host", err.Error())
+	if !errors.Is(err, lnkerror.ErrAlreadyManaged) {
+		t.Errorf("error = %v, want %v", err, lnkerror.ErrAlreadyManaged)
 	}
 }
 
@@ -582,8 +584,8 @@ func TestForget_HostScopedFile_WithEmptyHost(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error forgetting host-scoped file without --host, got nil")
 	}
-	if !strings.Contains(err.Error(), "--host") {
-		t.Errorf("error = %q, want mention of --host", err.Error())
+	if !errors.Is(err, lnkerror.ErrAlreadyManaged) {
+		t.Errorf("error = %v, want %v", err, lnkerror.ErrAlreadyManaged)
 	}
 }
 
