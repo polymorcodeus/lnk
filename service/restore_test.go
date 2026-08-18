@@ -330,6 +330,51 @@ func TestRestore_BlockedByCollision(t *testing.T) {
 	}
 }
 
+func TestRestore_BlockedByCollision_DryRun(t *testing.T) {
+	svc, home := testhelpers.TestHome(t)
+	repoPath := svc.RepoPath()
+
+	setupTrackedFile(t, repoPath, home, "common", ".bashrc", "# bashrc")
+
+	hostTrackerPath := filepath.Join(repoPath, ".lnk.testhost")
+	if err := os.WriteFile(hostTrackerPath, []byte(".bashrc\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Collision scan happens before any filesystem changes, so dry-run still errors.
+	_, err := svc.Restore(context.Background(), "", true)
+	if err == nil {
+		t.Fatal("expected error when ownership collision exists in dry run, got nil")
+	}
+	if !errors.Is(err, lnkerror.ErrDuplicateOwnership) {
+		t.Errorf("error = %v, want %v", err, lnkerror.ErrDuplicateOwnership)
+	}
+}
+
+func TestRestore_DryRun_HostScope(t *testing.T) {
+	svc, home := testhelpers.TestHome(t)
+	repoPath := svc.RepoPath()
+
+	setupTrackedFile(t, repoPath, home, "testhost", ".vimrc", "\" vimrc")
+
+	livePath := filepath.Join(home, ".vimrc")
+	if err := os.Remove(livePath); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := svc.Restore(context.Background(), "testhost", true)
+	if err != nil {
+		t.Fatalf("Restore dry run with host: %v", err)
+	}
+
+	if len(info.Restored) != 1 || info.Restored[0] != ".vimrc" {
+		t.Errorf("Restored = %v, want [.vimrc]", info.Restored)
+	}
+	if testhelpers.FileExists(t, livePath) {
+		t.Error("dry run must not create live symlink for host scope")
+	}
+}
+
 func TestRestore_V1_CommonScope(t *testing.T) {
 	svc, home := testhelpers.TestHomeV1(t)
 	repoPath := svc.RepoPath()

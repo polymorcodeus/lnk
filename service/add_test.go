@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/polymorcodeus/lnk/internal/fs"
 	"github.com/polymorcodeus/lnk/internal/lnkerror"
 	"github.com/polymorcodeus/lnk/internal/testhelpers"
 )
@@ -194,6 +195,38 @@ func TestAdd_RollbackOnPartialFailure(t *testing.T) {
 
 	// Tracker should be empty.
 	testhelpers.AssertNotTracked(t, repoPath, ".bashrc")
+}
+
+func TestAdd_EmptyPaths(t *testing.T) {
+	svc, _ := testhelpers.TestHome(t)
+
+	err := svc.Add(context.Background(), "", []string{})
+	if err == nil {
+		t.Fatal("expected error for empty paths, got nil")
+	}
+	if !errors.Is(err, lnkerror.ErrNoPaths) {
+		t.Errorf("error = %v, want %v", err, lnkerror.ErrNoPaths)
+	}
+}
+
+func TestAdd_PathIsSymlink(t *testing.T) {
+	svc, home := testhelpers.TestHome(t)
+
+	// Create a symlink where the user wants to add — lnk cannot manage symlinks.
+	filePath := filepath.Join(home, ".bashrc")
+	targetPath := filepath.Join(home, ".real-bashrc")
+	testhelpers.MakeFile(t, targetPath, "# real bashrc")
+	if err := os.Symlink(targetPath, filePath); err != nil {
+		t.Fatal(err)
+	}
+
+	err := svc.Add(context.Background(), "", []string{filePath})
+	if err == nil {
+		t.Fatal("expected error when adding a symlink, got nil")
+	}
+	if !errors.Is(err, fs.ErrUnsupportedType) {
+		t.Errorf("error = %v, want %v", err, fs.ErrUnsupportedType)
+	}
 }
 
 // ---------- Host-scope Add tests ----------

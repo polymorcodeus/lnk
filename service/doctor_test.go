@@ -2,10 +2,12 @@ package service_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/polymorcodeus/lnk/internal/lnkerror"
 	"github.com/polymorcodeus/lnk/internal/testhelpers"
 )
 
@@ -372,6 +374,62 @@ func TestDoctor_Fix_NoIssues_NoCommit(t *testing.T) {
 	if len(commitsAfter) != len(commitsBefore) {
 		t.Errorf("expected no new commit when no issues, before=%d after=%d",
 			len(commitsBefore), len(commitsAfter))
+	}
+}
+
+func TestDoctor_UninitializedRepo(t *testing.T) {
+	svc, _ := testhelpers.NewTestRepo(t)
+
+	_, err := svc.Doctor(context.Background(), "", false, false, false)
+	if err == nil {
+		t.Fatal("expected error on uninitialized repo, got nil")
+	}
+	if !errors.Is(err, lnkerror.ErrNotInitialized) {
+		t.Errorf("error = %v, want %v", err, lnkerror.ErrNotInitialized)
+	}
+}
+
+func TestDoctor_Fix_DirtyTree_Errors(t *testing.T) {
+	svc, home := testhelpers.TestHome(t)
+	repoPath := svc.RepoPath()
+
+	setupTrackedFile(t, repoPath, home, "common", ".bashrc", "# bashrc")
+
+	// Create an uncommitted change so the working tree is dirty.
+	dirtyFile := filepath.Join(repoPath, "dirty.txt")
+	if err := os.WriteFile(dirtyFile, []byte("uncommitted"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := svc.Doctor(context.Background(), "", false, true, false)
+	if err == nil {
+		t.Fatal("expected error when fixing with dirty tree, got nil")
+	}
+	if !errors.Is(err, lnkerror.ErrDirtyTree) {
+		t.Errorf("error = %v, want %v", err, lnkerror.ErrDirtyTree)
+	}
+}
+
+func TestDoctor_Fix_BackupCollision(t *testing.T) {
+	svc, home := testhelpers.TestHome(t)
+	repoPath := svc.RepoPath()
+
+	setupTrackedFile(t, repoPath, home, "common", ".bashrc", "# bashrc")
+
+	// Replace the managed symlink with a regular file and pre-create a backup.
+	livePath := filepath.Join(home, ".bashrc")
+	if err := os.Remove(livePath); err != nil {
+		t.Fatal(err)
+	}
+	testhelpers.MakeFile(t, livePath, "# local version")
+	testhelpers.MakeFile(t, livePath+".lnk-backup", "# existing backup")
+
+	_, err := svc.Doctor(context.Background(), "", false, true, false)
+	if err == nil {
+		t.Fatal("expected error when doctor fix encounters existing backup, got nil")
+	}
+	if !errors.Is(err, lnkerror.ErrBackupExists) {
+		t.Errorf("error = %v, want %v", err, lnkerror.ErrBackupExists)
 	}
 }
 
