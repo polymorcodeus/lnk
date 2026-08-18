@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/polymorcodeus/lnk/internal/fs"
+	"github.com/polymorcodeus/lnk/internal/gitboundary"
 	"github.com/polymorcodeus/lnk/internal/lnkerror"
 	"github.com/polymorcodeus/lnk/internal/tracker"
 )
@@ -91,7 +92,7 @@ func (s *Service) Doctor(ctx context.Context, host string, all, fix, pruneEmpty 
 	}
 
 	host = NormalizeHost(host)
-	report, err := s.doctorScan(host, all)
+	report, err := s.doctorScan(ctx, host, all)
 	if err != nil {
 		return DoctorReport{}, err
 	}
@@ -102,7 +103,7 @@ func (s *Service) Doctor(ctx context.Context, host string, all, fix, pruneEmpty 
 }
 
 // doctorScan performs a read-only scan of repo health.
-func (s *Service) doctorScan(host string, all bool) (DoctorReport, error) {
+func (s *Service) doctorScan(ctx context.Context, host string, all bool) (DoctorReport, error) {
 	report := DoctorReport{Mode: doctorMode(host, all)}
 
 	markerPath := filepath.Join(s.repoPath, repoMarkerFile)
@@ -119,6 +120,18 @@ func (s *Service) doctorScan(host string, all bool) (DoctorReport, error) {
 		return DoctorReport{}, err
 	}
 	report.Collisions = collisions
+
+	crossScope, err := s.scanCrossScope(ctx)
+	if err != nil {
+		return DoctorReport{}, err
+	}
+	if len(crossScope) > 0 {
+		report.ScopeResults = append(report.ScopeResults, ScopeResult{
+			Name:  "cross-scope",
+			Label: "inside git repo",
+			Items: crossScope,
+		})
+	}
 
 	scopes, err := s.doctorScopes(host, all)
 	if err != nil {
@@ -240,6 +253,53 @@ func (s *Service) doctorFix(ctx context.Context, host string, all, pruneEmpty bo
 	}
 
 	return report, s.commit(ctx, "lnk: doctor fixes")
+}
+
+// scanCrossScope finds tracked paths that are inside a git repo. These belong
+// in project scope, not common/host scope.
+func (s *Service) scanCrossScope(ctx context.Context) ([]string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("resolve home directory: %w", err)
+	}
+
+	format, err := s.getFormat()
+	if err != nil {
+		return nil, err
+	}
+
+	hosts, err := s.hosts()
+	if err != nil {
+		return nil, err
+	}
+
+	var violations []string
+	for _, host := range hosts {
+		items, itemErr := tracker.New(s.repoPath, host, format).GetManagedItems()
+		if itemErr != nil {
+			return nil, itemErr
+		}
+		for _, item := range items {
+			absPath := filepath.Join(homeDir, item)
+			if _, statErr := os.Stat(absPath); statErr != nil {
+				if errors.Is(statErr, os.ErrNotExist) {
+					continue
+				}
+				return nil, fmt.Errorf("check cross-scope for %s: %w", item, statErr)
+			}
+
+			inside, _, err := gitboundary.IsInsideGitRepo(ctx, absPath)
+			if err != nil {
+				return nil, err
+			}
+			if inside {
+				violations = append(violations, item)
+			}
+		}
+	}
+
+	slices.Sort(violations)
+	return violations, nil
 }
 
 // scanEmptyScopes returns host scope names whose tracker files exist but

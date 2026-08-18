@@ -154,6 +154,7 @@ func TestNewRootCommand(t *testing.T) {
 			"init", "clone", "add", "move", "remove", "forget",
 			"list", "status", "diff", "commit", "push", "pull",
 			"restore", "update", "doctor", "format", "bootstrap",
+			"project",
 		}
 		for _, name := range want {
 			c, _, err := root.Find([]string{name})

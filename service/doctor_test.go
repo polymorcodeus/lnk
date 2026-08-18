@@ -771,3 +771,42 @@ func TestDoctor_PruneEmpty_Fix_AllScope(t *testing.T) {
 		t.Error("expected empty tracker removed in --all mode")
 	}
 }
+
+// ---------- Cross-scope tests ----------
+
+func TestDoctor_FlagsCrossScopeCollision(t *testing.T) {
+	svc, home := testhelpers.TestHome(t)
+	repoPath := svc.RepoPath()
+
+	repoDir := filepath.Join(home, "repos", "hermes")
+	testhelpers.MakeDir(t, repoDir)
+	testhelpers.InitGitRepo(t, repoDir)
+
+	relativePath := "repos/hermes/.cursor/rules.md"
+
+	// Manually track a project file in common scope to simulate a bad state.
+	setupTrackedFile(t, repoPath, home, "common", relativePath, "# rules")
+
+	report, err := svc.Doctor(context.Background(), "", false, false, false)
+	if err != nil {
+		t.Fatalf("Doctor: %v", err)
+	}
+
+	if !report.HasIssues() {
+		t.Error("expected HasIssues=true with cross-scope collision")
+	}
+
+	found := false
+	for _, result := range report.ScopeResults {
+		if result.Name == "cross-scope" && result.Label == "inside git repo" {
+			for _, item := range result.Items {
+				if item == relativePath {
+					found = true
+				}
+			}
+		}
+	}
+	if !found {
+		t.Errorf("expected cross-scope result containing %q, got %+v", relativePath, report.ScopeResults)
+	}
+}

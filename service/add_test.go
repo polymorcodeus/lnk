@@ -505,3 +505,44 @@ func TestAdd_V1Legacy_PreservesPriorEntries(t *testing.T) {
 	testhelpers.AssertTracked(t, repoPath, ".bashrc")
 	testhelpers.AssertTracked(t, repoPath, ".vimrc")
 }
+
+// ---------- Git boundary tests ----------
+
+func TestAdd_RefusesProjectFile(t *testing.T) {
+	svc, home := testhelpers.TestHome(t)
+
+	repoDir := filepath.Join(home, "repos", "hermes")
+	testhelpers.MakeDir(t, repoDir)
+	testhelpers.InitGitRepo(t, repoDir)
+
+	projectFile := filepath.Join(repoDir, ".cursor", "rules.md")
+	testhelpers.MakeFile(t, projectFile, "# rules")
+
+	err := svc.Add(context.Background(), "", []string{projectFile})
+	if err == nil {
+		t.Fatal("expected error adding project file, got nil")
+	}
+	if !errors.Is(err, lnkerror.ErrInsideGitRepo) {
+		t.Errorf("error = %v, want %v", err, lnkerror.ErrInsideGitRepo)
+	}
+}
+
+func TestAdd_AcceptsDotfileFromInsideRepo(t *testing.T) {
+	svc, home := testhelpers.TestHome(t)
+	repoPath := svc.RepoPath()
+
+	repoDir := filepath.Join(home, "repos", "hermes")
+	testhelpers.MakeDir(t, repoDir)
+	testhelpers.InitGitRepo(t, repoDir)
+
+	dotfile := filepath.Join(home, ".vimrc")
+	testhelpers.MakeFile(t, dotfile, "# vimrc")
+
+	if err := svc.Add(context.Background(), "", []string{dotfile}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	storagePath := filepath.Join(repoPath, "common.lnk", ".vimrc")
+	testhelpers.AssertSymlink(t, dotfile, storagePath)
+	testhelpers.AssertTracked(t, repoPath, ".vimrc")
+}
