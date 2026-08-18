@@ -3,9 +3,11 @@ package service
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/polymorcodeus/lnk/internal/filemanager"
+	"github.com/polymorcodeus/lnk/internal/gitboundary"
 	"github.com/polymorcodeus/lnk/internal/lnkerror"
 )
 
@@ -30,6 +32,16 @@ func (s *Service) Add(ctx context.Context, host string, paths []string) error {
 			return lnkerror.WithPath(lnkerror.ErrDuplicatePath, file.RelativePath)
 		}
 		seen[file.RelativePath] = struct{}{}
+
+		if _, err := os.Stat(file.AbsPath); err == nil {
+			inside, gitRoot, err := gitboundary.IsInsideGitRepo(ctx, file.AbsPath)
+			if err != nil {
+				return err
+			}
+			if inside {
+				return lnkerror.WithPathAndSuggestion(lnkerror.ErrInsideGitRepo, file.RelativePath, fmt.Sprintf("inside git repo %s; use 'lnk project add' from within the project", gitRoot))
+			}
+		}
 
 		owner, err := s.findOwner(file.RelativePath)
 		if err != nil {

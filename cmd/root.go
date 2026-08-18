@@ -52,6 +52,7 @@ func NewRootCommand() *cobra.Command {
 	rootCmd.AddCommand(newRestoreCmd(&repoPath))
 	rootCmd.AddCommand(newUpdateCmd(&repoPath))
 	rootCmd.AddCommand(newDoctorCmd(&repoPath))
+	rootCmd.AddCommand(newProjectCmd(&repoPath))
 	rootCmd.AddCommand(newBootstrapCmd(&repoPath))
 	rootCmd.AddCommand(newFormatCmd(&repoPath))
 	rootCmd.AddCommand(newHomeCmd(&repoPath))
@@ -158,6 +159,29 @@ func newAddCmd(repoFlag *string) *cobra.Command {
 
 	cmd.Flags().StringVar(&host, "host", "", "track paths in a host-specific scope")
 	return cmd
+}
+
+// newProjectCmd returns the "project" command group.
+func newProjectCmd(repoFlag *string) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "project",
+		Short: "Manage project-local dotfiles",
+	}
+	cmd.AddCommand(newProjectAddCmd(repoFlag))
+	return cmd
+}
+
+// newProjectAddCmd returns the "project add" subcommand.
+func newProjectAddCmd(repoFlag *string) *cobra.Command {
+	return &cobra.Command{
+		Use:   "add <path...>",
+		Short: "Track project-local files",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := svc(repoFlag)
+			return app.ProjectAdd(cmd.Context(), args)
+		},
+	}
 }
 
 // newMoveCmd returns the "move" subcommand.

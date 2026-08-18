@@ -31,6 +31,21 @@ func InitRepo(t *testing.T, svc *service.Service) {
 	}
 }
 
+// InitGitRepo initializes a git repository at dir with a default test config.
+func InitGitRepo(t *testing.T, dir string) {
+	t.Helper()
+	cmds := [][]string{
+		{"git", "-C", dir, "init", "-b", "main"},
+		{"git", "-C", dir, "config", "user.email", "test@lnk"},
+		{"git", "-C", dir, "config", "user.name", "Lnk Test"},
+	}
+	for _, args := range cmds {
+		if out, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
+			t.Fatalf("%v: %v\n%s", args, err, out)
+		}
+	}
+}
+
 // TestHome sets up a temp home directory and an initialized v2 lnk repo inside it,
 // returning the service and the home path. The repo lives at $HOME/.config/lnk
 // to match the default ResolveRepoPath behaviour.
