@@ -258,11 +258,6 @@ func (s *Service) doctorFix(ctx context.Context, host string, all, pruneEmpty bo
 // scanCrossScope finds tracked paths that are inside a git repo. These belong
 // in project scope, not common/host scope.
 func (s *Service) scanCrossScope(ctx context.Context) ([]string, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("resolve home directory: %w", err)
-	}
-
 	format, err := s.getFormat()
 	if err != nil {
 		return nil, err
@@ -280,7 +275,10 @@ func (s *Service) scanCrossScope(ctx context.Context) ([]string, error) {
 			return nil, itemErr
 		}
 		for _, item := range items {
-			absPath := filepath.Join(homeDir, item)
+			absPath, err := s.resolver.ToLive(item)
+			if err != nil {
+				return nil, err
+			}
 			if _, statErr := os.Stat(absPath); statErr != nil {
 				if errors.Is(statErr, os.ErrNotExist) {
 					continue

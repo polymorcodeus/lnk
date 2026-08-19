@@ -24,7 +24,7 @@ func (s *Service) Add(ctx context.Context, host string, paths []string) error {
 	host = NormalizeHost(host)
 	seen := make(map[string]struct{}, len(paths))
 	for _, input := range paths {
-		file, err := homeRelativePath(input)
+		file, err := s.homeRelativePath(input)
 		if err != nil {
 			return err
 		}

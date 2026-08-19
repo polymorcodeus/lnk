@@ -16,7 +16,7 @@ func (s *Service) Move(ctx context.Context, input string, toHost string, toCommo
 	if err := s.requireGitRepo(); err != nil {
 		return err
 	}
-	file, err := homeRelativePath(input)
+	file, err := s.homeRelativePath(input)
 	if err != nil {
 		return err
 	}

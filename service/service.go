@@ -15,6 +15,7 @@ import (
 	fspkg "github.com/polymorcodeus/lnk/internal/fs"
 	gitpkg "github.com/polymorcodeus/lnk/internal/git"
 	"github.com/polymorcodeus/lnk/internal/lnkerror"
+	"github.com/polymorcodeus/lnk/internal/scope"
 	"github.com/polymorcodeus/lnk/internal/tracker"
 )
 
@@ -31,9 +32,19 @@ type Service struct {
 	git           *gitpkg.Git
 	format        tracker.RepoFormat
 	gitConfigured bool
+	resolver      scope.Resolver
 }
 
 type Option func(*Service)
+
+// WithResolver sets the scope resolver used to translate between live and
+// storage paths. When unset, New constructs a HomeRelativeResolver from
+// os.UserHomeDir().
+func WithResolver(r scope.Resolver) Option {
+	return func(s *Service) {
+		s.resolver = r
+	}
+}
 
 // WithColor is a convenience wrapper that returns git.WithColor
 func WithColor(enabled bool) Option {
@@ -101,8 +112,28 @@ func New(repoPath string, opts ...Option) *Service {
 		opt(s)
 	}
 
+	if s.resolver == nil {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			// Preserve existing error behavior by using a resolver that
+			// surfaces the home-directory lookup error when used.
+			s.resolver = &failingResolver{err: fmt.Errorf("resolve home directory: %w", err)}
+		} else {
+			s.resolver = &scope.HomeRelativeResolver{Home: homeDir}
+		}
+	}
+
 	return s
 }
+
+// failingResolver returns its construction error for every operation.
+type failingResolver struct {
+	err error
+}
+
+func (r *failingResolver) ToStorage(string) (string, error) { return "", r.err }
+func (r *failingResolver) ToLive(string) (string, error)    { return "", r.err }
+func (r *failingResolver) BaseDir() string                  { return "" }
 
 // ResolveRepoPath resolves the repo path from explicit flag or environment.
 func ResolveRepoPath(explicit string) string {
@@ -223,7 +254,7 @@ func (s *Service) findOwnerInScope(relativePath, host string) (*owner, error) {
 // resolveRemovalScope determines which scope owns a path for removal/forget operations.
 func (s *Service) resolveRemovalScope(input, host string) (string, homePath, error) {
 	// host is explicitly not normalized to allow for input lookup across all scopes
-	file, err := homeRelativePath(input)
+	file, err := s.homeRelativePath(input)
 	if err != nil {
 		return "", homePath{}, err
 	}
@@ -286,11 +317,10 @@ func (s *Service) scanCollisions() ([]OwnershipCollision, error) {
 
 // repointManagedSymlink recreates the live symlink so it points to the new storage path.
 func (s *Service) repointManagedSymlink(relativePath, targetPath string) error {
-	homeDir, err := os.UserHomeDir()
+	livePath, err := s.resolver.ToLive(relativePath)
 	if err != nil {
-		return fmt.Errorf("resolve home directory: %w", err)
+		return err
 	}
-	livePath := filepath.Join(homeDir, relativePath)
 	if _, err := os.Lstat(livePath); errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
@@ -324,16 +354,12 @@ func (s *Service) stagePaths(ctx context.Context, paths ...string) error {
 }
 
 // homeRelativePath resolves an input path to an absolute path and its relative path from $HOME.
-func homeRelativePath(input string) (homePath, error) {
+func (s *Service) homeRelativePath(input string) (homePath, error) {
 	absPath, err := filepath.Abs(input)
 	if err != nil {
 		return homePath{}, fmt.Errorf("resolve path %s: %w", input, err)
 	}
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return homePath{}, fmt.Errorf("resolve home directory: %w", err)
-	}
-	relativePath, err := filepath.Rel(homeDir, absPath)
+	relativePath, err := s.resolver.ToStorage(absPath)
 	if err != nil {
 		return homePath{}, fmt.Errorf("resolve relative path %s: %w", input, err)
 	}
@@ -377,11 +403,6 @@ func isManagedSymlink(livePath, expectedTarget string) bool {
 
 // profileItems returns the ordered list of items that make up the effective machine profile.
 func (s *Service) profileItems(host string) ([]profileItem, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("resolve home directory: %w", err)
-	}
-
 	format, err := s.getFormat()
 	if err != nil {
 		return nil, err
@@ -410,10 +431,14 @@ func (s *Service) profileItems(host string) ([]profileItem, error) {
 			if err != nil {
 				return nil, err
 			}
+			livePath, err := s.resolver.ToLive(relativePath)
+			if err != nil {
+				return nil, err
+			}
 			items = append(items, profileItem{
 				RelativePath: relativePath,
 				RepoPath:     filepath.Join(hostPath, relativePath),
-				LivePath:     filepath.Join(homeDir, relativePath),
+				LivePath:     livePath,
 			})
 		}
 	}
