@@ -263,3 +263,297 @@ func TestProjectUntrackPattern_ErrorsWhenMissing(t *testing.T) {
 		t.Errorf("error = %v, want %v", err, lnkerror.ErrNotManaged)
 	}
 }
+
+func TestProjectPush_MovesMatchingFileToStorage(t *testing.T) {
+	svc, home := testhelpers.TestHome(t)
+	repoDir := filepath.Join(home, "repos", "hermes")
+	testhelpers.MakeDir(t, repoDir)
+	initProjectRepo(t, repoDir)
+
+	ps := service.NewProjectService(svc)
+	if _, err := ps.ProjectAddPattern(context.Background(), repoDir, ".cursor/**"); err != nil {
+		t.Fatalf("add pattern: %v", err)
+	}
+
+	liveFile := filepath.Join(repoDir, ".cursor", "rules.md")
+	testhelpers.MakeFile(t, liveFile, "# rules\n")
+
+	result, err := ps.ProjectPush(context.Background(), repoDir)
+	if err != nil {
+		t.Fatalf("ProjectPush: %v", err)
+	}
+	if len(result.Synced) != 1 || result.Synced[0] != ".cursor/rules.md" {
+		t.Errorf("synced = %v, want [.cursor/rules.md]", result.Synced)
+	}
+
+	storageFile := filepath.Join(svc.RepoPath(), "projects", result.ProjectID, ".cursor", "rules.md")
+	if !testhelpers.FileExists(t, storageFile) {
+		t.Errorf("expected storage file %s", storageFile)
+	}
+	testhelpers.AssertSymlink(t, liveFile, storageFile)
+
+	if logs := testhelpers.GitLog(t, svc.RepoPath()); len(logs) < 2 {
+		t.Errorf("expected at least 2 commits, got %d", len(logs))
+	}
+}
+
+func TestProjectPush_SkipsAlreadySymlinked(t *testing.T) {
+	svc, home := testhelpers.TestHome(t)
+	repoDir := filepath.Join(home, "repos", "hermes")
+	testhelpers.MakeDir(t, repoDir)
+	initProjectRepo(t, repoDir)
+
+	ps := service.NewProjectService(svc)
+	if _, err := ps.ProjectAddPattern(context.Background(), repoDir, ".cursor/**"); err != nil {
+		t.Fatalf("add pattern: %v", err)
+	}
+
+	liveFile := filepath.Join(repoDir, ".cursor", "rules.md")
+	testhelpers.MakeFile(t, liveFile, "# rules\n")
+
+	if _, err := ps.ProjectPush(context.Background(), repoDir); err != nil {
+		t.Fatalf("first push: %v", err)
+	}
+
+	result, err := ps.ProjectPush(context.Background(), repoDir)
+	if err != nil {
+		t.Fatalf("second push: %v", err)
+	}
+	if len(result.Synced) != 0 {
+		t.Errorf("synced = %v, want empty", result.Synced)
+	}
+}
+
+func TestProjectPush_ErrorsWhenNoPatterns(t *testing.T) {
+	svc, home := testhelpers.TestHome(t)
+	repoDir := filepath.Join(home, "repos", "hermes")
+	testhelpers.MakeDir(t, repoDir)
+	initProjectRepo(t, repoDir)
+
+	ps := service.NewProjectService(svc)
+	_, err := ps.ProjectPush(context.Background(), repoDir)
+	if err == nil {
+		t.Fatal("expected error when no patterns")
+	}
+	if !errors.Is(err, lnkerror.ErrNoPatterns) {
+		t.Errorf("error = %v, want %v", err, lnkerror.ErrNoPatterns)
+	}
+}
+
+func TestProjectPush_SkipsGitDirectory(t *testing.T) {
+	svc, home := testhelpers.TestHome(t)
+	repoDir := filepath.Join(home, "repos", "hermes")
+	testhelpers.MakeDir(t, repoDir)
+	initProjectRepo(t, repoDir)
+
+	ps := service.NewProjectService(svc)
+	if _, err := ps.ProjectAddPattern(context.Background(), repoDir, "*.md"); err != nil {
+		t.Fatalf("add pattern: %v", err)
+	}
+
+	gitConfig := filepath.Join(repoDir, ".git", "config")
+	if _, err := os.Stat(gitConfig); err != nil {
+		t.Fatalf("expected .git/config to exist: %v", err)
+	}
+
+	liveFile := filepath.Join(repoDir, "README.md")
+	testhelpers.MakeFile(t, liveFile, "# hello\n")
+
+	result, err := ps.ProjectPush(context.Background(), repoDir)
+	if err != nil {
+		t.Fatalf("ProjectPush: %v", err)
+	}
+	if len(result.Synced) != 1 || result.Synced[0] != "README.md" {
+		t.Errorf("synced = %v, want [README.md]", result.Synced)
+	}
+
+	if !testhelpers.FileExists(t, gitConfig) {
+		t.Error("expected .git/config to remain in place")
+	}
+}
+
+func TestProjectPush_CreatesStorageDir(t *testing.T) {
+	svc, home := testhelpers.TestHome(t)
+	repoDir := filepath.Join(home, "repos", "hermes")
+	testhelpers.MakeDir(t, repoDir)
+	initProjectRepo(t, repoDir)
+
+	ps := service.NewProjectService(svc)
+	if _, err := ps.ProjectAddPattern(context.Background(), repoDir, "*.md"); err != nil {
+		t.Fatalf("add pattern: %v", err)
+	}
+
+	id, err := resolver.ResolveProjectID(context.Background(), repoDir)
+	if err != nil {
+		t.Fatalf("resolve project id: %v", err)
+	}
+	storageDir := filepath.Join(svc.RepoPath(), "projects", id)
+	if testhelpers.FileExists(t, storageDir) {
+		t.Fatal("expected storage dir not to exist before push")
+	}
+
+	liveFile := filepath.Join(repoDir, "notes.md")
+	testhelpers.MakeFile(t, liveFile, "notes\n")
+
+	if _, err := ps.ProjectPush(context.Background(), repoDir); err != nil {
+		t.Fatalf("ProjectPush: %v", err)
+	}
+
+	if !testhelpers.FileExists(t, storageDir) {
+		t.Error("expected storage dir to be created")
+	}
+}
+
+func TestProjectRestore_RecreatesSymlinks(t *testing.T) {
+	svc, home := testhelpers.TestHome(t)
+	repoDir := filepath.Join(home, "repos", "hermes")
+	testhelpers.MakeDir(t, repoDir)
+	initProjectRepo(t, repoDir)
+
+	ps := service.NewProjectService(svc)
+	if _, err := ps.ProjectAddPattern(context.Background(), repoDir, ".cursor/**"); err != nil {
+		t.Fatalf("add pattern: %v", err)
+	}
+
+	liveFile := filepath.Join(repoDir, ".cursor", "rules.md")
+	testhelpers.MakeFile(t, liveFile, "# rules\n")
+
+	result, err := ps.ProjectPush(context.Background(), repoDir)
+	if err != nil {
+		t.Fatalf("ProjectPush: %v", err)
+	}
+
+	storageFile := filepath.Join(svc.RepoPath(), "projects", result.ProjectID, ".cursor", "rules.md")
+	if err := os.Remove(liveFile); err != nil {
+		t.Fatalf("remove symlink: %v", err)
+	}
+
+	info, err := ps.ProjectRestore(context.Background(), repoDir, false)
+	if err != nil {
+		t.Fatalf("ProjectRestore: %v", err)
+	}
+	if len(info.Restored) != 1 {
+		t.Errorf("restored = %v, want 1 entry", info.Restored)
+	}
+	testhelpers.AssertSymlink(t, liveFile, storageFile)
+}
+
+func TestProjectRestore_BackupsExistingFile(t *testing.T) {
+	svc, home := testhelpers.TestHome(t)
+	repoDir := filepath.Join(home, "repos", "hermes")
+	testhelpers.MakeDir(t, repoDir)
+	initProjectRepo(t, repoDir)
+
+	ps := service.NewProjectService(svc)
+	if _, err := ps.ProjectAddPattern(context.Background(), repoDir, ".cursor/**"); err != nil {
+		t.Fatalf("add pattern: %v", err)
+	}
+
+	liveFile := filepath.Join(repoDir, ".cursor", "rules.md")
+	testhelpers.MakeFile(t, liveFile, "# rules\n")
+
+	result, err := ps.ProjectPush(context.Background(), repoDir)
+	if err != nil {
+		t.Fatalf("ProjectPush: %v", err)
+	}
+
+	storageFile := filepath.Join(svc.RepoPath(), "projects", result.ProjectID, ".cursor", "rules.md")
+	if err := os.Remove(liveFile); err != nil {
+		t.Fatalf("remove symlink: %v", err)
+	}
+	testhelpers.MakeFile(t, liveFile, "local changes\n")
+
+	info, err := ps.ProjectRestore(context.Background(), repoDir, false)
+	if err != nil {
+		t.Fatalf("ProjectRestore: %v", err)
+	}
+	if len(info.Restored) != 1 || len(info.BackedUp) != 1 {
+		t.Errorf("restored = %v, backed up = %v", info.Restored, info.BackedUp)
+	}
+
+	testhelpers.AssertSymlink(t, liveFile, storageFile)
+	backupFile := liveFile + ".lnk-backup"
+	if !testhelpers.FileExists(t, backupFile) {
+		t.Error("expected .lnk-backup file")
+	}
+}
+
+func TestProjectRestore_DryRun(t *testing.T) {
+	svc, home := testhelpers.TestHome(t)
+	repoDir := filepath.Join(home, "repos", "hermes")
+	testhelpers.MakeDir(t, repoDir)
+	initProjectRepo(t, repoDir)
+
+	ps := service.NewProjectService(svc)
+	if _, err := ps.ProjectAddPattern(context.Background(), repoDir, ".cursor/**"); err != nil {
+		t.Fatalf("add pattern: %v", err)
+	}
+
+	liveFile := filepath.Join(repoDir, ".cursor", "rules.md")
+	testhelpers.MakeFile(t, liveFile, "# rules\n")
+
+	if _, err := ps.ProjectPush(context.Background(), repoDir); err != nil {
+		t.Fatalf("ProjectPush: %v", err)
+	}
+
+	if err := os.Remove(liveFile); err != nil {
+		t.Fatalf("remove symlink: %v", err)
+	}
+
+	info, err := ps.ProjectRestore(context.Background(), repoDir, true)
+	if err != nil {
+		t.Fatalf("ProjectRestore: %v", err)
+	}
+	if len(info.Restored) != 1 {
+		t.Errorf("restored = %v, want 1 entry", info.Restored)
+	}
+
+	if _, err := os.Lstat(liveFile); err == nil {
+		t.Error("expected symlink not to be created in dry-run mode")
+	}
+}
+
+func TestProjectPull_PullsAndRestores(t *testing.T) {
+	svc, home := testhelpers.TestHome(t)
+	repoDir := filepath.Join(home, "repos", "hermes")
+	testhelpers.MakeDir(t, repoDir)
+	initProjectRepo(t, repoDir)
+
+	remote := testhelpers.NewBareRemote(t)
+	cmds := [][]string{
+		{"git", "-C", svc.RepoPath(), "remote", "add", "origin", remote},
+		{"git", "-C", svc.RepoPath(), "push", "-u", "origin", "main"},
+	}
+	for _, args := range cmds {
+		if out, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
+			t.Fatalf("%v: %v\n%s", args, err, out)
+		}
+	}
+
+	ps := service.NewProjectService(svc)
+	if _, err := ps.ProjectAddPattern(context.Background(), repoDir, ".cursor/**"); err != nil {
+		t.Fatalf("add pattern: %v", err)
+	}
+
+	liveFile := filepath.Join(repoDir, ".cursor", "rules.md")
+	testhelpers.MakeFile(t, liveFile, "# rules\n")
+
+	result, err := ps.ProjectPush(context.Background(), repoDir)
+	if err != nil {
+		t.Fatalf("ProjectPush: %v", err)
+	}
+
+	storageFile := filepath.Join(svc.RepoPath(), "projects", result.ProjectID, ".cursor", "rules.md")
+	if err := os.Remove(liveFile); err != nil {
+		t.Fatalf("remove symlink: %v", err)
+	}
+
+	info, err := ps.ProjectPull(context.Background(), repoDir)
+	if err != nil {
+		t.Fatalf("ProjectPull: %v", err)
+	}
+	if len(info.Restored) != 1 {
+		t.Errorf("restored = %v, want 1 entry", info.Restored)
+	}
+	testhelpers.AssertSymlink(t, liveFile, storageFile)
+}

@@ -174,6 +174,9 @@ func newProjectCmd(repoFlag *string) *cobra.Command {
 	cmd.AddCommand(newProjectAddCmd(repoFlag))
 	cmd.AddCommand(newProjectListCmd(repoFlag))
 	cmd.AddCommand(newProjectUntrackCmd(repoFlag))
+	cmd.AddCommand(newProjectPushCmd(repoFlag))
+	cmd.AddCommand(newProjectRestoreCmd(repoFlag))
+	cmd.AddCommand(newProjectPullCmd(repoFlag))
 	return cmd
 }
 
@@ -344,6 +347,91 @@ func newProjectUntrackCmd(repoFlag *string) *cobra.Command {
 		},
 	}
 	return cmd
+}
+
+// newProjectPushCmd returns the "project push" subcommand.
+func newProjectPushCmd(repoFlag *string) *cobra.Command {
+	return &cobra.Command{
+		Use:   "push",
+		Short: "Push matching project files into lnk storage",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			projectRoot, err := projectDir(cmd)
+			if err != nil {
+				return err
+			}
+
+			ps := service.NewProjectService(svc(repoFlag))
+			result, err := ps.ProjectPush(cmd.Context(), projectRoot)
+			if err != nil {
+				return err
+			}
+
+			if len(result.Synced) == 0 {
+				_, err = fmt.Fprintln(cmd.OutOrStdout(), "Nothing to sync — all tracked files are already up to date")
+				return err
+			}
+			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Synced %d file(s) to project storage\n", len(result.Synced)); err != nil {
+				return err
+			}
+			for _, path := range result.Synced {
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", path); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	}
+}
+
+// newProjectRestoreCmd returns the "project restore" subcommand.
+func newProjectRestoreCmd(repoFlag *string) *cobra.Command {
+	var dryRun bool
+
+	cmd := &cobra.Command{
+		Use:   "restore [--dry-run]",
+		Short: "Recreate symlinks for project files from storage",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			projectRoot, err := projectDir(cmd)
+			if err != nil {
+				return err
+			}
+
+			ps := service.NewProjectService(svc(repoFlag))
+			info, err := ps.ProjectRestore(cmd.Context(), projectRoot, dryRun)
+			if err != nil {
+				return err
+			}
+			return printRestore(cmd.OutOrStdout(), info, dryRun)
+		},
+	}
+
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview restore actions without changing files")
+	return cmd
+}
+
+// newProjectPullCmd returns the "project pull" subcommand.
+func newProjectPullCmd(repoFlag *string) *cobra.Command {
+	return &cobra.Command{
+		Use:   "pull",
+		Short: "Pull lnk repo changes and restore project symlinks",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			projectRoot, err := projectDir(cmd)
+			if err != nil {
+				return err
+			}
+
+			ps := service.NewProjectService(svc(repoFlag))
+			info, err := ps.ProjectPull(cmd.Context(), projectRoot)
+			if err != nil {
+				return err
+			}
+			if err := printRestore(cmd.OutOrStdout(), info, false); err != nil {
+				return err
+			}
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), "Pulled project changes")
+			return err
+		},
+	}
 }
 
 // newMoveCmd returns the "move" subcommand.
