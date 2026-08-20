@@ -48,3 +48,29 @@ func (r *HomeRelativeResolver) ToLive(storagePath string) (string, error) {
 func (r *HomeRelativeResolver) BaseDir() string {
 	return r.StorageDir
 }
+
+// ProjectRootResolver maps paths relative to a git repository root.
+// This is the resolver for project scopes.
+type ProjectRootResolver struct {
+	GitRoot    string
+	StorageDir string
+}
+
+// ToStorage returns the path of absPath relative to the git repository root.
+func (r *ProjectRootResolver) ToStorage(absPath string) (string, error) {
+	rel, err := filepath.Rel(r.GitRoot, absPath)
+	if err != nil {
+		return "", fmt.Errorf("make project-relative: %w", err)
+	}
+	return rel, nil
+}
+
+// ToLive returns the absolute path for a storage-relative path.
+func (r *ProjectRootResolver) ToLive(storagePath string) (string, error) {
+	return filepath.Join(r.GitRoot, storagePath), nil
+}
+
+// BaseDir returns the configured storage directory for this scope.
+func (r *ProjectRootResolver) BaseDir() string {
+	return r.StorageDir
+}
