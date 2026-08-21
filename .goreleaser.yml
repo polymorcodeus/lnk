@@ -9,6 +9,8 @@ before:
     - go mod tidy
     # you may remove this if you don't need go generate
     - go generate ./...
+    # Generate man pages so they ship with releases.
+    - go run ./tools/gen-docs man
 
 builds:
   - env:
@@ -44,6 +46,7 @@ archives:
     files:
       - README.md
       - LICENSE
+      - man/
     builds_info:
       group: root
       owner: root
