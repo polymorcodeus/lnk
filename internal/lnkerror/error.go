@@ -22,6 +22,7 @@ var (
 	ErrInsideGitRepo              = errors.New("file is inside a git repo")
 	ErrOutsideGitRepo             = errors.New("file is outside any git repo")
 	ErrProjectScopeNotImplemented = errors.New("project scope is not yet implemented")
+	ErrNoPatterns                 = errors.New("no patterns defined")
 )
 
 // Error wraps a sentinel error with optional context for display.
