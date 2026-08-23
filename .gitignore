@@ -1,49 +1,15 @@
-# Binaries for programs and plugins
-*.exe
-*.exe~
-*.dll
-*.so
-*.dylib
+# Build output
 /lnk
+/dist/
+/man/
 
-# Test binary, built with `go test -c`
+# Test coverage (make test-cover)
+coverage.out
+coverage.html
+
+# Compiled test binaries (go test -c)
 *.test
 
-# Output of the go coverage tool
-*.out
-*.html
-
-# Go workspace file
+# Go workspace
 go.work
 go.work.sum
-
-# Build artifacts
-dist/
-bin/
-man/
-
-# IDE and editor files
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS generated files
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-desktop.ini
-
-# Temporary files
-*.tmp
-*.log
-
-# GoReleaser artifacts
-goreleaser/
-/target/
-.snap/
