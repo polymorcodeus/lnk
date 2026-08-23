@@ -37,6 +37,7 @@ func NewRootCommand() *cobra.Command {
 	}
 
 	rootCmd.PersistentFlags().StringVar(&repoPath, "repo", "", "path to the lnk repository")
+	rootCmd.PersistentFlags().Bool("no-project", false, "skip automatic project scope detection")
 
 	rootCmd.AddCommand(newInitCmd(&repoPath))
 	rootCmd.AddCommand(newCloneCmd(&repoPath))
@@ -913,7 +914,8 @@ func newRestoreCmd(repoFlag *string) *cobra.Command {
 		Short: "Restore the effective machine profile",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := svc(repoFlag)
-			info, err := app.Restore(cmd.Context(), host, dryRun)
+			noProject, _ := cmd.Flags().GetBool("no-project")
+			info, err := app.RestoreWithProject(cmd.Context(), host, noProject, dryRun)
 			if err != nil {
 				return err
 			}
@@ -935,7 +937,8 @@ func newUpdateCmd(repoFlag *string) *cobra.Command {
 		Short: "Pull repo changes and restore the effective machine profile",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := svc(repoFlag)
-			info, err := app.Update(cmd.Context(), host)
+			noProject, _ := cmd.Flags().GetBool("no-project")
+			info, err := app.UpdateWithProject(cmd.Context(), host, noProject)
 			if err != nil {
 				return err
 			}
