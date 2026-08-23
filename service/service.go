@@ -76,6 +76,9 @@ type ListResult struct {
 type RestoreInfo struct {
 	Restored []string
 	BackedUp []string
+	// SkippedTracked lists project-scope paths left untouched because the
+	// project's own git index tracks them (requires force to manage).
+	SkippedTracked []string
 }
 
 // OwnershipCollision describes a path claimed by more than one scope.

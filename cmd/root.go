@@ -10,7 +10,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/polymorcodeus/lnk/internal/gitboundary"
 	"github.com/polymorcodeus/lnk/service"
 )
 
@@ -181,7 +180,7 @@ func newProjectCmd(repoFlag *string) *cobra.Command {
 }
 
 // projectDir resolves the --dir flag (defaulting to the current working
-// directory) and validates that it is inside a git repository.
+// directory). The service layer anchors it at the enclosing git repo root.
 func projectDir(cmd *cobra.Command) (string, error) {
 	dir, _ := cmd.Flags().GetString("dir")
 	if dir == "" {
@@ -195,14 +194,6 @@ func projectDir(cmd *cobra.Command) (string, error) {
 	absDir, err := filepath.Abs(dir)
 	if err != nil {
 		return "", fmt.Errorf("resolve path %s: %w", dir, err)
-	}
-
-	inside, _, err := gitboundary.IsInsideGitRepo(cmd.Context(), absDir)
-	if err != nil {
-		return "", err
-	}
-	if !inside {
-		return "", fmt.Errorf("%s is not inside a git repository", absDir)
 	}
 
 	return absDir, nil
@@ -249,12 +240,17 @@ func newProjectAddCmd(repoFlag *string) *cobra.Command {
 
 			ps := service.NewProjectService(svc(repoFlag))
 			for _, pattern := range args {
-				normalized, err := ps.ProjectAddPattern(cmd.Context(), projectRoot, pattern)
+				normalized, matched, err := ps.ProjectAddPattern(cmd.Context(), projectRoot, pattern)
 				if err != nil {
 					return err
 				}
 				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Added '%s' to .lnkinclude — remember to commit it.\n", normalized); err != nil {
 					return err
+				}
+				if !matched {
+					if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "warning: '%s' matches no existing files; it will apply to future matches\n", normalized); err != nil {
+						return err
+					}
 				}
 			}
 			return nil
@@ -331,7 +327,7 @@ func newProjectUntrackCmd(repoFlag *string) *cobra.Command {
 			}
 
 			ps := service.NewProjectService(svc(repoFlag))
-			removed, isGlobal, err := ps.ProjectUntrackPattern(projectRoot, args[0])
+			removed, isGlobal, err := ps.ProjectUntrackPattern(cmd.Context(), projectRoot, args[0])
 			if err != nil {
 				return err
 			}
@@ -351,8 +347,10 @@ func newProjectUntrackCmd(repoFlag *string) *cobra.Command {
 
 // newProjectPushCmd returns the "project push" subcommand.
 func newProjectPushCmd(repoFlag *string) *cobra.Command {
-	return &cobra.Command{
-		Use:   "push",
+	var force bool
+
+	cmd := &cobra.Command{
+		Use:   "push [--force]",
 		Short: "Push matching project files into lnk storage",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			projectRoot, err := projectDir(cmd)
@@ -361,13 +359,21 @@ func newProjectPushCmd(repoFlag *string) *cobra.Command {
 			}
 
 			ps := service.NewProjectService(svc(repoFlag))
-			result, err := ps.ProjectPush(cmd.Context(), projectRoot)
+			result, err := ps.ProjectPush(cmd.Context(), projectRoot, force)
 			if err != nil {
 				return err
 			}
 
+			for _, path := range result.SkippedTracked {
+				if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "warning: skipped '%s': tracked by this repo's git (add '!%s' to .lnkinclude, or use --force)\n", path, path); err != nil {
+					return err
+				}
+			}
+
 			if len(result.Synced) == 0 {
-				_, err = fmt.Fprintln(cmd.OutOrStdout(), "Nothing to sync — all tracked files are already up to date")
+				if len(result.SkippedTracked) == 0 {
+					_, err = fmt.Fprintln(cmd.OutOrStdout(), "Nothing to sync — all tracked files are already up to date")
+				}
 				return err
 			}
 			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Synced %d file(s) to project storage\n", len(result.Synced)); err != nil {
@@ -381,14 +387,18 @@ func newProjectPushCmd(repoFlag *string) *cobra.Command {
 			return nil
 		},
 	}
+
+	cmd.Flags().BoolVar(&force, "force", false, "also manage files tracked by the project's own git")
+	return cmd
 }
 
 // newProjectRestoreCmd returns the "project restore" subcommand.
 func newProjectRestoreCmd(repoFlag *string) *cobra.Command {
 	var dryRun bool
+	var force bool
 
 	cmd := &cobra.Command{
-		Use:   "restore [--dry-run]",
+		Use:   "restore [--dry-run] [--force]",
 		Short: "Recreate symlinks for project files from storage",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			projectRoot, err := projectDir(cmd)
@@ -397,7 +407,7 @@ func newProjectRestoreCmd(repoFlag *string) *cobra.Command {
 			}
 
 			ps := service.NewProjectService(svc(repoFlag))
-			info, err := ps.ProjectRestore(cmd.Context(), projectRoot, dryRun)
+			info, err := ps.ProjectRestore(cmd.Context(), projectRoot, dryRun, force)
 			if err != nil {
 				return err
 			}
@@ -406,13 +416,16 @@ func newProjectRestoreCmd(repoFlag *string) *cobra.Command {
 	}
 
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview restore actions without changing files")
+	cmd.Flags().BoolVar(&force, "force", false, "replace files tracked by the project's own git")
 	return cmd
 }
 
 // newProjectPullCmd returns the "project pull" subcommand.
 func newProjectPullCmd(repoFlag *string) *cobra.Command {
-	return &cobra.Command{
-		Use:   "pull",
+	var force bool
+
+	cmd := &cobra.Command{
+		Use:   "pull [--force]",
 		Short: "Pull lnk repo changes and restore project symlinks",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			projectRoot, err := projectDir(cmd)
@@ -421,7 +434,7 @@ func newProjectPullCmd(repoFlag *string) *cobra.Command {
 			}
 
 			ps := service.NewProjectService(svc(repoFlag))
-			info, err := ps.ProjectPull(cmd.Context(), projectRoot)
+			info, err := ps.ProjectPull(cmd.Context(), projectRoot, force)
 			if err != nil {
 				return err
 			}
@@ -432,6 +445,9 @@ func newProjectPullCmd(repoFlag *string) *cobra.Command {
 			return err
 		},
 	}
+
+	cmd.Flags().BoolVar(&force, "force", false, "replace files tracked by the project's own git")
+	return cmd
 }
 
 // newMoveCmd returns the "move" subcommand.
@@ -806,13 +822,23 @@ func printRestore(w io.Writer, info service.RestoreInfo, dryRun bool) error {
 			return err
 		}
 	}
-	if len(info.BackedUp) == 0 {
+	if len(info.BackedUp) > 0 {
+		if _, err := fmt.Fprintf(w, "%s %d conflicting path(s)\n", backupPrefix, len(info.BackedUp)); err != nil {
+			return err
+		}
+		for _, path := range info.BackedUp {
+			if _, err := fmt.Fprintf(w, "  %s\n", path); err != nil {
+				return err
+			}
+		}
+	}
+	if len(info.SkippedTracked) == 0 {
 		return nil
 	}
-	if _, err := fmt.Fprintf(w, "%s %d conflicting path(s)\n", backupPrefix, len(info.BackedUp)); err != nil {
+	if _, err := fmt.Fprintf(w, "Skipped %d path(s) tracked by the project's git (use --force to manage them)\n", len(info.SkippedTracked)); err != nil {
 		return err
 	}
-	for _, path := range info.BackedUp {
+	for _, path := range info.SkippedTracked {
 		if _, err := fmt.Fprintf(w, "  %s\n", path); err != nil {
 			return err
 		}

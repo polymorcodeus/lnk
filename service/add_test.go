@@ -527,6 +527,24 @@ func TestAdd_RefusesProjectFile(t *testing.T) {
 	}
 }
 
+func TestAdd_NonExistentPathInsideGitRepo(t *testing.T) {
+	svc, home := testhelpers.TestHome(t)
+
+	repoDir := filepath.Join(home, "repos", "hermes")
+	testhelpers.MakeDir(t, repoDir)
+	testhelpers.InitGitRepo(t, repoDir)
+
+	// A ! negation (or any pattern) is project-scope syntax; host scope should
+	// point at the right command instead of a bare "file not found".
+	err := svc.Add(context.Background(), "", []string{filepath.Join(repoDir, "!AGENTS.md")})
+	if err == nil {
+		t.Fatal("expected error for pattern-like path inside a git repo")
+	}
+	if !errors.Is(err, lnkerror.ErrInsideGitRepo) {
+		t.Errorf("error = %v, want %v", err, lnkerror.ErrInsideGitRepo)
+	}
+}
+
 func TestAdd_AcceptsDotfileFromInsideRepo(t *testing.T) {
 	svc, home := testhelpers.TestHome(t)
 	repoPath := svc.RepoPath()

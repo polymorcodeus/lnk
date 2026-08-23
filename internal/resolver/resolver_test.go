@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/polymorcodeus/lnk/internal/resolver"
@@ -83,6 +84,26 @@ func TestResolveProjectID_NoOrigin(t *testing.T) {
 	}
 	if !errors.Is(err, resolver.ErrNoOrigin) {
 		t.Errorf("error = %v, want %v", err, resolver.ErrNoOrigin)
+	}
+}
+
+func TestLocalProjectID(t *testing.T) {
+	dir := t.TempDir()
+
+	id := resolver.LocalProjectID(dir)
+	base := strings.ToLower(filepath.Base(dir))
+	if !strings.HasPrefix(id, "local/"+base+"-") {
+		t.Errorf("LocalProjectID = %q, want local/%s-<hash> prefix", id, base)
+	}
+
+	again := resolver.LocalProjectID(dir)
+	if id != again {
+		t.Errorf("LocalProjectID not deterministic: %q vs %q", id, again)
+	}
+
+	other := resolver.LocalProjectID(filepath.Join(dir, "other"))
+	if id == other {
+		t.Errorf("expected distinct IDs for distinct roots, both %q", id)
 	}
 }
 

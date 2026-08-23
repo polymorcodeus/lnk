@@ -56,6 +56,34 @@ func TestGit_Init(t *testing.T) {
 	})
 }
 
+func TestGit_Run(t *testing.T) {
+	t.Parallel()
+
+	t.Run("executes_read_only_command", func(t *testing.T) {
+		t.Parallel()
+		tmp := t.TempDir()
+		g := initRepo(t, tmp)
+
+		out, err := g.Run(context.Background(), "rev-parse", "--is-inside-work-tree")
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		if strings.TrimSpace(string(out)) != "true" {
+			t.Errorf("output = %q, want true", out)
+		}
+	})
+
+	t.Run("returns_error_output", func(t *testing.T) {
+		t.Parallel()
+		tmp := t.TempDir()
+		g := initRepo(t, tmp)
+
+		if _, err := g.Run(context.Background(), "not-a-command"); err == nil {
+			t.Fatal("expected error for unknown command")
+		}
+	})
+}
+
 func TestGit_EnsureGitConfigOnce(t *testing.T) {
 	t.Parallel()
 

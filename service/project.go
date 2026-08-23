@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	fspkg "github.com/polymorcodeus/lnk/internal/fs"
+	gitpkg "github.com/polymorcodeus/lnk/internal/git"
 	"github.com/polymorcodeus/lnk/internal/gitboundary"
 	"github.com/polymorcodeus/lnk/internal/lnkerror"
 	"github.com/polymorcodeus/lnk/internal/patterns"
@@ -29,24 +30,17 @@ func NewProjectService(svc *Service) *ProjectService {
 	return &ProjectService{svc: svc}
 }
 
-// ProjectInit activates project scope for projectRoot by creating an empty
-// ./.lnkinclude file if one does not already exist. It returns true when the
-// file was created and false when it already existed.
+// ProjectInit activates project scope for the git repo containing
+// projectRoot by creating an empty .lnkinclude file at the repo root if one
+// does not already exist. It returns true when the file was created and
+// false when it already existed.
 func (ps *ProjectService) ProjectInit(ctx context.Context, projectRoot string) (bool, error) {
-	projectRoot, err := filepath.Abs(projectRoot)
+	root, err := ps.resolveProjectRoot(ctx, projectRoot)
 	if err != nil {
-		return false, fmt.Errorf("resolve project root: %w", err)
-	}
-
-	if err := ps.requireInsideGitRepo(ctx, projectRoot); err != nil {
 		return false, err
 	}
 
-	if _, err := resolver.ResolveProjectID(ctx, projectRoot); err != nil {
-		return false, fmt.Errorf("resolve project id: %w", err)
-	}
-
-	manifest := filepath.Join(projectRoot, ".lnkinclude")
+	manifest := filepath.Join(root, ".lnkinclude")
 	if _, err := os.Stat(manifest); err == nil {
 		return false, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -59,58 +53,53 @@ func (ps *ProjectService) ProjectInit(ctx context.Context, projectRoot string) (
 	return true, nil
 }
 
-// ProjectAddPattern appends a pattern to the project's ./.lnkinclude file.
-// Absolute paths inside the project are normalized to project-relative form.
-// It returns the normalized pattern that was written.
-func (ps *ProjectService) ProjectAddPattern(ctx context.Context, projectRoot, rawPattern string) (string, error) {
-	projectRoot, err := filepath.Abs(projectRoot)
+// ProjectAddPattern appends a pattern to the project's .lnkinclude file at
+// the git root. Existing on-disk paths inside the project are normalized to
+// project-relative form; anything else (globs, ! negations, files that do
+// not exist yet) is stored verbatim. It returns the stored pattern and
+// whether it matches at least one existing file (always true for negations,
+// which are not match-checked).
+func (ps *ProjectService) ProjectAddPattern(ctx context.Context, projectRoot, rawPattern string) (string, bool, error) {
+	root, err := ps.resolveProjectRoot(ctx, projectRoot)
 	if err != nil {
-		return "", fmt.Errorf("resolve project root: %w", err)
+		return "", false, err
 	}
 
-	if err := ps.requireInsideGitRepo(ctx, projectRoot); err != nil {
-		return "", err
-	}
-
-	if _, err := resolver.ResolveProjectID(ctx, projectRoot); err != nil {
-		return "", fmt.Errorf("resolve project id: %w", err)
-	}
-
-	pattern, err := ps.normalizePattern(projectRoot, rawPattern)
+	pattern, err := normalizePattern(root, rawPattern)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 
-	manifest := filepath.Join(projectRoot, ".lnkinclude")
+	manifest := filepath.Join(root, ".lnkinclude")
 	existing, err := patterns.Load(manifest)
 	if err != nil {
-		return "", fmt.Errorf("load .lnkinclude: %w", err)
+		return "", false, fmt.Errorf("load .lnkinclude: %w", err)
 	}
 	if slices.Contains(existing, pattern) {
-		return "", lnkerror.WithPath(lnkerror.ErrAlreadyManaged, pattern)
+		return "", false, lnkerror.WithPath(lnkerror.ErrAlreadyManaged, pattern)
 	}
 
-	if err := ps.appendPattern(manifest, pattern); err != nil {
-		return "", err
+	matched := true
+	if !strings.HasPrefix(pattern, "!") {
+		matched, err = matchesAnyFile(root, pattern)
+		if err != nil {
+			return "", false, err
+		}
 	}
 
-	return pattern, nil
+	if err := appendPattern(manifest, pattern); err != nil {
+		return "", false, err
+	}
+
+	return pattern, matched, nil
 }
 
 // ProjectListPatterns returns the effective patterns for a project, split
-// into global (lnk repo root) and local (./.lnkinclude) lists.
+// into global (lnk repo root) and local (.lnkinclude at the git root) lists.
 func (ps *ProjectService) ProjectListPatterns(ctx context.Context, projectRoot string) (global, local []string, err error) {
-	projectRoot, err = filepath.Abs(projectRoot)
+	root, err := ps.resolveProjectRoot(ctx, projectRoot)
 	if err != nil {
-		return nil, nil, fmt.Errorf("resolve project root: %w", err)
-	}
-
-	if err := ps.requireInsideGitRepo(ctx, projectRoot); err != nil {
 		return nil, nil, err
-	}
-
-	if _, err := resolver.ResolveProjectID(ctx, projectRoot); err != nil {
-		return nil, nil, fmt.Errorf("resolve project id: %w", err)
 	}
 
 	global, err = patterns.Load(filepath.Join(ps.svc.RepoPath(), ".lnkinclude"))
@@ -118,7 +107,7 @@ func (ps *ProjectService) ProjectListPatterns(ctx context.Context, projectRoot s
 		return nil, nil, fmt.Errorf("load global .lnkinclude: %w", err)
 	}
 
-	local, err = patterns.Load(filepath.Join(projectRoot, ".lnkinclude"))
+	local, err = patterns.Load(filepath.Join(root, ".lnkinclude"))
 	if err != nil {
 		return nil, nil, fmt.Errorf("load local .lnkinclude: %w", err)
 	}
@@ -126,17 +115,17 @@ func (ps *ProjectService) ProjectListPatterns(ctx context.Context, projectRoot s
 	return global, local, nil
 }
 
-// ProjectUntrackPattern removes a pattern from the project's ./.lnkinclude.
-// It returns removed=true when the pattern was removed from the local file.
-// When the pattern exists only in the global file, it returns removed=false
-// and isGlobal=true so the caller can print a warning.
-func (ps *ProjectService) ProjectUntrackPattern(projectRoot, pattern string) (removed, isGlobal bool, err error) {
-	projectRoot, err = filepath.Abs(projectRoot)
+// ProjectUntrackPattern removes a pattern from the project's .lnkinclude at
+// the git root. It returns removed=true when the pattern was removed from
+// the local file. When the pattern exists only in the global file, it
+// returns removed=false and isGlobal=true so the caller can print a warning.
+func (ps *ProjectService) ProjectUntrackPattern(ctx context.Context, projectRoot, pattern string) (removed, isGlobal bool, err error) {
+	root, err := ps.resolveProjectRoot(ctx, projectRoot)
 	if err != nil {
-		return false, false, fmt.Errorf("resolve project root: %w", err)
+		return false, false, err
 	}
 
-	localPath := filepath.Join(projectRoot, ".lnkinclude")
+	localPath := filepath.Join(root, ".lnkinclude")
 	localLines, err := patterns.Load(localPath)
 	if err != nil {
 		return false, false, fmt.Errorf("load local .lnkinclude: %w", err)
@@ -145,7 +134,7 @@ func (ps *ProjectService) ProjectUntrackPattern(projectRoot, pattern string) (re
 	removed = slices.Contains(localLines, pattern)
 
 	if removed {
-		if err := ps.rewritePatterns(localPath, localLines, pattern); err != nil {
+		if err := rewritePatterns(localPath, localLines, pattern); err != nil {
 			return false, false, err
 		}
 		return true, false, nil
@@ -162,54 +151,194 @@ func (ps *ProjectService) ProjectUntrackPattern(projectRoot, pattern string) (re
 	return false, false, lnkerror.WithPath(lnkerror.ErrNotManaged, pattern)
 }
 
-// requireInsideGitRepo returns an error if projectRoot is not inside a git repo.
-func (ps *ProjectService) requireInsideGitRepo(ctx context.Context, projectRoot string) error {
-	inside, _, err := gitboundary.IsInsideGitRepo(ctx, projectRoot)
+// resolveProjectRoot anchors a project command at the root of the git
+// working tree containing dir, and refuses the lnk repository itself:
+// treating it as a project would store the repo inside its own storage.
+func (ps *ProjectService) resolveProjectRoot(ctx context.Context, dir string) (string, error) {
+	abs, err := filepath.Abs(dir)
 	if err != nil {
-		return err
+		return "", fmt.Errorf("resolve project root: %w", err)
 	}
-	if !inside {
-		return lnkerror.WithPathAndSuggestion(lnkerror.ErrOutsideGitRepo, projectRoot, "use 'lnk add' for host/common scope")
+
+	root, err := gitboundary.ResolveGitRoot(ctx, abs)
+	if err != nil {
+		return "", err
 	}
-	return nil
+	if root == "" {
+		return "", lnkerror.WithPathAndSuggestion(lnkerror.ErrOutsideGitRepo, abs, "use 'lnk add' for host/common scope")
+	}
+
+	if ps.isLnkRepoRoot(root) {
+		return "", lnkerror.WithPathAndSuggestion(lnkerror.ErrIsLnkRepository, root, "the lnk repo manages itself; project scope is for other git repositories")
+	}
+
+	return root, nil
 }
 
-// normalizePattern converts an absolute path inside the project to a
-// project-relative pattern. Patterns that are already relative or that lie
-// outside the project are returned unchanged.
-func (ps *ProjectService) normalizePattern(projectRoot, rawPattern string) (string, error) {
-	if !filepath.IsAbs(rawPattern) {
-		absPattern, err := filepath.Abs(filepath.Join(projectRoot, rawPattern))
-		if err != nil {
-			return "", fmt.Errorf("resolve pattern %s: %w", rawPattern, err)
-		}
-		rel, err := filepath.Rel(projectRoot, absPattern)
-		if err != nil {
-			return "", fmt.Errorf("relativize pattern %s: %w", rawPattern, err)
-		}
-		if !strings.HasPrefix(rel, "..") && rel != ".." {
-			return rel, nil
-		}
-		return rawPattern, nil
+// isLnkRepoRoot reports whether root is an lnk repository: either it carries
+// the .lnkrepo marker (including clones of the repo elsewhere on disk) or it
+// resolves to the configured repo path.
+func (ps *ProjectService) isLnkRepoRoot(root string) bool {
+	if _, err := os.Stat(filepath.Join(root, repoMarkerFile)); err == nil {
+		return true
+	}
+	repoPath, err := filepath.EvalSymlinks(ps.svc.RepoPath())
+	if err != nil {
+		return false
+	}
+	canonicalRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return false
+	}
+	return repoPath == canonicalRoot
+}
+
+// projectID resolves the storage identifier for the project, falling back to
+// a local path-derived identifier when the repo has no origin remote.
+func (ps *ProjectService) projectID(ctx context.Context, root string) (string, error) {
+	id, err := resolver.ResolveProjectID(ctx, root)
+	if errors.Is(err, resolver.ErrNoOrigin) {
+		return resolver.LocalProjectID(root), nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("resolve project id: %w", err)
+	}
+	return id, nil
+}
+
+// normalizePattern converts raw into the pattern stored in .lnkinclude. When
+// raw names an existing file or directory it is relativized to the project
+// root, and existing paths outside the project are rejected. Anything else
+// (glob patterns, ! negations, files that do not exist yet) is returned
+// verbatim.
+func normalizePattern(projectRoot, raw string) (string, error) {
+	pattern := strings.TrimSpace(raw)
+	body := strings.TrimPrefix(pattern, "!")
+	if body == "" {
+		return "", lnkerror.Wrap(lnkerror.ErrEmptyPattern)
 	}
 
-	absPattern, err := filepath.Abs(rawPattern)
-	if err != nil {
-		return "", fmt.Errorf("resolve pattern %s: %w", rawPattern, err)
+	candidate := body
+	if !filepath.IsAbs(candidate) {
+		candidate = filepath.Join(projectRoot, candidate)
 	}
-	rel, err := filepath.Rel(projectRoot, absPattern)
-	if err != nil {
-		return "", fmt.Errorf("relativize pattern %s: %w", rawPattern, err)
+	if _, err := os.Lstat(candidate); err != nil {
+		return pattern, nil
 	}
-	if strings.HasPrefix(rel, "..") || rel == ".." {
-		return "", lnkerror.WithPathAndSuggestion(lnkerror.ErrOutsideGitRepo, rawPattern, "pattern must be inside the project")
+
+	// Canonicalize the directory portion of both sides: git reports the repo
+	// root with symlinks resolved, while the user may pass a path through a
+	// symlinked prefix. The leaf is never resolved: an already-managed file
+	// is a symlink into lnk storage and must still relativize to its live
+	// path inside the project.
+	canonicalRoot, err := filepath.EvalSymlinks(projectRoot)
+	if err != nil {
+		canonicalRoot = projectRoot
+	}
+	canonicalDir, err := filepath.EvalSymlinks(filepath.Dir(candidate))
+	if err != nil {
+		canonicalDir = filepath.Dir(candidate)
+	}
+	canonicalCandidate := filepath.Join(canonicalDir, filepath.Base(candidate))
+
+	rel, err := filepath.Rel(canonicalRoot, canonicalCandidate)
+	if err != nil {
+		return "", fmt.Errorf("relativize pattern %s: %w", raw, err)
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", lnkerror.WithPathAndSuggestion(lnkerror.ErrOutsideProject, raw, "patterns must match files inside the project")
+	}
+	if strings.HasPrefix(pattern, "!") {
+		return "!" + rel, nil
 	}
 	return rel, nil
 }
 
-// appendPattern appends pattern to manifest, ensuring a preceding newline when
-// the file already exists and does not end with one.
-func (ps *ProjectService) appendPattern(manifest, pattern string) error {
+// errPatternMatched stops the walk early once matchesAnyFile finds a hit.
+var errPatternMatched = errors.New("pattern matched")
+
+// matchesAnyFile reports whether pattern matches at least one existing file
+// in the project.
+func matchesAnyFile(root, pattern string) (bool, error) {
+	err := walkProjectFiles(root, func(_, rel string) error {
+		ok, err := patterns.Match([]string{pattern}, rel)
+		if err != nil {
+			return err
+		}
+		if ok {
+			return errPatternMatched
+		}
+		return nil
+	})
+	if errors.Is(err, errPatternMatched) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return false, nil
+}
+
+// walkProjectFiles calls fn for every regular, non-symlinked file under
+// root, pruning .git directories and nested git working trees. The rel path
+// passed to fn uses '/' separators relative to root.
+func walkProjectFiles(root string, fn func(absPath, rel string) error) error {
+	return filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if info.IsDir() {
+			if info.Name() == ".git" {
+				return filepath.SkipDir
+			}
+			if path != root && hasGitMarker(path) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		return fn(path, filepath.ToSlash(rel))
+	})
+}
+
+// hasGitMarker reports whether dir is the root of a git working tree: a
+// .git directory, or a .git file as used by submodules and linked worktrees.
+func hasGitMarker(dir string) bool {
+	_, err := os.Lstat(filepath.Join(dir, ".git"))
+	return err == nil
+}
+
+// implicitlyExcluded reports whether rel is lnk metadata that must never be
+// managed, regardless of the effective patterns.
+func implicitlyExcluded(rel string) bool {
+	return rel == ".lnkinclude" || strings.HasSuffix(rel, ".lnk-backup")
+}
+
+// projectTrackedFiles returns the set of slash-separated, root-relative
+// paths tracked by the project's own git index.
+func projectTrackedFiles(ctx context.Context, root string) (map[string]struct{}, error) {
+	out, err := gitpkg.New(root).Run(ctx, "ls-files", "-z")
+	if err != nil {
+		return nil, fmt.Errorf("list project-tracked files: %w\n%s", err, out)
+	}
+	tracked := make(map[string]struct{})
+	for p := range strings.SplitSeq(string(out), "\x00") {
+		if p != "" {
+			tracked[p] = struct{}{}
+		}
+	}
+	return tracked, nil
+}
+
+// appendPattern appends pattern to manifest, ensuring a preceding newline
+// when the file already exists and does not end with one.
+func appendPattern(manifest, pattern string) error {
 	f, err := os.OpenFile(manifest, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return fmt.Errorf("open .lnkinclude: %w", err)
@@ -235,7 +364,7 @@ func (ps *ProjectService) appendPattern(manifest, pattern string) error {
 }
 
 // rewritePatterns writes lines back to manifest, excluding dropPattern.
-func (ps *ProjectService) rewritePatterns(manifest string, lines []string, dropPattern string) error {
+func rewritePatterns(manifest string, lines []string, dropPattern string) error {
 	f, err := os.Create(manifest)
 	if err != nil {
 		return fmt.Errorf("rewrite .lnkinclude: %w", err)
@@ -264,24 +393,27 @@ func (ps *ProjectService) rewritePatterns(manifest string, lines []string, dropP
 type ProjectPushResult struct {
 	ProjectID string
 	Synced    []string
+	// SkippedTracked lists matched files left untouched because the
+	// project's own git index tracks them (requires force to manage).
+	SkippedTracked []string
 }
 
 // ProjectPush walks the project repository, moves matching files to the lnk
 // project storage directory, and symlinks them back. It then stages and
-// commits the changes in the lnk repo.
-func (ps *ProjectService) ProjectPush(ctx context.Context, projectRoot string) (ProjectPushResult, error) {
-	projectRoot, err := filepath.Abs(projectRoot)
+// commits the changes in the lnk repo. Files tracked by the project's own
+// git index are skipped unless force is set, since replacing them with
+// symlinks would dirty the project's working tree with a typechange. Files
+// that fail to move are collected and reported as an aggregate error after
+// the rest are synced.
+func (ps *ProjectService) ProjectPush(ctx context.Context, projectRoot string, force bool) (ProjectPushResult, error) {
+	root, err := ps.resolveProjectRoot(ctx, projectRoot)
 	if err != nil {
-		return ProjectPushResult{}, fmt.Errorf("resolve project root: %w", err)
-	}
-
-	if err := ps.requireInsideGitRepo(ctx, projectRoot); err != nil {
 		return ProjectPushResult{}, err
 	}
 
-	id, err := resolver.ResolveProjectID(ctx, projectRoot)
+	id, err := ps.projectID(ctx, root)
 	if err != nil {
-		return ProjectPushResult{}, fmt.Errorf("resolve project id: %w", err)
+		return ProjectPushResult{}, err
 	}
 
 	storageDir := filepath.Join(ps.svc.RepoPath(), "projects", id)
@@ -289,98 +421,51 @@ func (ps *ProjectService) ProjectPush(ctx context.Context, projectRoot string) (
 		return ProjectPushResult{}, fmt.Errorf("create project storage: %w", err)
 	}
 
-	resolver := &scope.ProjectRootResolver{
-		GitRoot:    projectRoot,
-		StorageDir: storageDir,
-	}
-
 	global, err := patterns.Load(filepath.Join(ps.svc.RepoPath(), ".lnkinclude"))
 	if err != nil {
 		return ProjectPushResult{}, fmt.Errorf("load global .lnkinclude: %w", err)
 	}
 
-	local, err := patterns.Load(filepath.Join(projectRoot, ".lnkinclude"))
+	local, err := patterns.Load(filepath.Join(root, ".lnkinclude"))
 	if err != nil {
 		return ProjectPushResult{}, fmt.Errorf("load local .lnkinclude: %w", err)
 	}
 
-	effective := append(global, local...)
+	effective := slices.Concat(global, local)
 	if len(effective) == 0 {
 		return ProjectPushResult{}, lnkerror.Wrap(lnkerror.ErrNoPatterns)
 	}
 
+	tracked, err := projectTrackedFiles(ctx, root)
+	if err != nil {
+		return ProjectPushResult{}, err
+	}
+
 	result := ProjectPushResult{ProjectID: id}
 	fs := &fspkg.FileSystem{}
+	var failed []error
 
-	err = filepath.Walk(projectRoot, func(path string, info os.FileInfo, walkErr error) error {
-		if walkErr != nil {
+	err = walkProjectFiles(root, func(path, rel string) error {
+		if implicitlyExcluded(rel) {
 			return nil
 		}
-		if info.IsDir() {
-			if info.Name() == ".git" {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			return nil
-		}
-
-		rel, err := resolver.ToStorage(path)
-		if err != nil {
-			return nil
-		}
-		rel = filepath.ToSlash(rel)
-
 		match, err := patterns.Match(effective, rel)
-		if err != nil || !match {
-			return nil
-		}
-
-		storagePath := filepath.Join(storageDir, rel)
-
-		liveInfo, err := os.Lstat(path)
 		if err != nil {
+			return err
+		}
+		if !match {
 			return nil
 		}
-
-		if liveInfo.Mode()&os.ModeSymlink != 0 {
-			target, err := os.Readlink(path)
-			if err == nil {
-				if !filepath.IsAbs(target) {
-					target = filepath.Join(filepath.Dir(path), target)
-				}
-				target = filepath.Clean(target)
-				if target == storagePath {
-					if _, err := os.Stat(storagePath); err == nil {
-						return nil
-					}
-				}
-			}
-			if err := os.Remove(path); err != nil {
+		if !force {
+			if _, ok := tracked[rel]; ok {
+				result.SkippedTracked = append(result.SkippedTracked, rel)
 				return nil
 			}
 		}
-
-		if err := os.MkdirAll(filepath.Dir(storagePath), 0o755); err != nil {
+		if err := moveToStorage(fs, path, filepath.Join(storageDir, filepath.FromSlash(rel))); err != nil {
+			failed = append(failed, fmt.Errorf("%s: %w", rel, err))
 			return nil
 		}
-
-		if moveErr := fs.MoveFile(path, storagePath); moveErr != nil {
-			if _, statErr := os.Stat(storagePath); statErr == nil {
-				if err := fs.CreateSymlink(storagePath, path); err != nil {
-					return nil
-				}
-				result.Synced = append(result.Synced, rel)
-			}
-			return nil
-		}
-
-		if err := fs.CreateSymlink(storagePath, path); err != nil {
-			_ = fs.MoveFile(storagePath, path)
-			return nil
-		}
-
 		result.Synced = append(result.Synced, rel)
 		return nil
 	})
@@ -396,36 +481,65 @@ func (ps *ProjectService) ProjectPush(ctx context.Context, projectRoot string) (
 	if err != nil {
 		return result, err
 	}
-	if !hasChanges {
-		return result, nil
+	if hasChanges {
+		if err := ps.svc.commit(ctx, "lnk: sync project "+id); err != nil {
+			return result, err
+		}
 	}
 
-	if err := ps.svc.commit(ctx, "lnk: sync project "+id); err != nil {
-		return result, err
+	if len(failed) > 0 {
+		return result, fmt.Errorf("%w: %w", lnkerror.ErrSyncFailed, errors.Join(failed...))
 	}
 
 	return result, nil
 }
 
-// ProjectRestore recreates symlinks for all project-scoped files from storage.
-func (ps *ProjectService) ProjectRestore(ctx context.Context, projectRoot string, dryRun bool) (RestoreInfo, error) {
-	projectRoot, err := filepath.Abs(projectRoot)
+// moveToStorage moves livePath to storagePath and symlinks it back. If
+// linking fails the move is rolled back so the live file is never lost.
+func moveToStorage(fs *fspkg.FileSystem, livePath, storagePath string) error {
+	if err := os.MkdirAll(filepath.Dir(storagePath), 0o755); err != nil {
+		return fmt.Errorf("create storage directory: %w", err)
+	}
+	if err := fs.MoveFile(livePath, storagePath); err != nil {
+		return fmt.Errorf("move to storage: %w", err)
+	}
+	if err := fs.CreateSymlink(storagePath, livePath); err != nil {
+		if rbErr := fs.MoveFile(storagePath, livePath); rbErr != nil {
+			return fmt.Errorf("create symlink: %w (rollback failed: %v)", err, rbErr)
+		}
+		return fmt.Errorf("create symlink: %w", err)
+	}
+	return nil
+}
+
+// ProjectRestore recreates symlinks for all project-scoped files from
+// storage. Live files tracked by the project's own git index are left
+// untouched (and reported in RestoreInfo.SkippedTracked) unless force is
+// set, since replacing them with symlinks would dirty the project's working
+// tree with a typechange.
+func (ps *ProjectService) ProjectRestore(ctx context.Context, projectRoot string, dryRun, force bool) (RestoreInfo, error) {
+	root, err := ps.resolveProjectRoot(ctx, projectRoot)
 	if err != nil {
-		return RestoreInfo{}, fmt.Errorf("resolve project root: %w", err)
+		return RestoreInfo{}, err
 	}
 
-	id, err := resolver.ResolveProjectID(ctx, projectRoot)
+	id, err := ps.projectID(ctx, root)
 	if err != nil {
-		return RestoreInfo{}, fmt.Errorf("resolve project id: %w", err)
+		return RestoreInfo{}, err
 	}
 
 	storageDir := filepath.Join(ps.svc.RepoPath(), "projects", id)
 	if _, err := os.Stat(storageDir); os.IsNotExist(err) {
-		return RestoreInfo{}, lnkerror.WithPathAndSuggestion(lnkerror.ErrNotManaged, projectRoot, "run 'lnk project push' first")
+		return RestoreInfo{}, lnkerror.WithPathAndSuggestion(lnkerror.ErrNotManaged, root, "run 'lnk project push' first")
 	}
 
-	resolver := &scope.ProjectRootResolver{
-		GitRoot:    projectRoot,
+	tracked, err := projectTrackedFiles(ctx, root)
+	if err != nil {
+		return RestoreInfo{}, err
+	}
+
+	r := &scope.ProjectRootResolver{
+		GitRoot:    root,
 		StorageDir: storageDir,
 	}
 
@@ -433,27 +547,40 @@ func (ps *ProjectService) ProjectRestore(ctx context.Context, projectRoot string
 	fs := &fspkg.FileSystem{}
 
 	err = filepath.Walk(storageDir, func(path string, fi os.FileInfo, walkErr error) error {
-		if walkErr != nil || fi.IsDir() {
+		if walkErr != nil {
+			return walkErr
+		}
+		if fi.IsDir() {
 			return nil
 		}
 
 		rel, err := filepath.Rel(storageDir, path)
 		if err != nil {
-			return nil
+			return err
 		}
 		rel = filepath.ToSlash(rel)
 
-		livePath, err := resolver.ToLive(rel)
+		livePath, err := r.ToLive(rel)
 		if err != nil {
-			return nil
+			return err
 		}
 
-		liveInfo, err := os.Lstat(livePath)
-		if err == nil {
-			if liveInfo.Mode()&os.ModeSymlink != 0 {
+		liveInfo, statErr := os.Lstat(livePath)
+		liveExists := statErr == nil
+		liveIsSymlink := liveExists && liveInfo.Mode()&os.ModeSymlink != 0
+
+		if !force && !liveIsSymlink {
+			if _, ok := tracked[rel]; ok {
+				info.SkippedTracked = append(info.SkippedTracked, rel)
+				return nil
+			}
+		}
+
+		if liveExists {
+			if liveIsSymlink {
 				if !dryRun {
 					if err := os.Remove(livePath); err != nil {
-						return nil
+						return fmt.Errorf("replace symlink %s: %w", livePath, err)
 					}
 				}
 			} else {
@@ -491,9 +618,9 @@ func (ps *ProjectService) ProjectRestore(ctx context.Context, projectRoot string
 }
 
 // ProjectPull pulls the lnk repo and restores project symlinks.
-func (ps *ProjectService) ProjectPull(ctx context.Context, projectRoot string) (RestoreInfo, error) {
+func (ps *ProjectService) ProjectPull(ctx context.Context, projectRoot string, force bool) (RestoreInfo, error) {
 	if err := ps.svc.git.Pull(ctx); err != nil {
 		return RestoreInfo{}, err
 	}
-	return ps.ProjectRestore(ctx, projectRoot, false)
+	return ps.ProjectRestore(ctx, projectRoot, false, force)
 }
