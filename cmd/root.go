@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -167,21 +168,510 @@ func newProjectCmd(repoFlag *string) *cobra.Command {
 		Use:   "project",
 		Short: "Manage project-local dotfiles",
 	}
+	cmd.PersistentFlags().String("dir", "", "project directory (default: current directory)")
+	cmd.AddCommand(newProjectInitCmd(repoFlag))
 	cmd.AddCommand(newProjectAddCmd(repoFlag))
+	cmd.AddCommand(newProjectListCmd(repoFlag))
+	cmd.AddCommand(newProjectUntrackCmd(repoFlag))
+	cmd.AddCommand(newProjectPushCmd(repoFlag))
+	cmd.AddCommand(newProjectSyncCmd(repoFlag))
+	cmd.AddCommand(newProjectRestoreCmd(repoFlag))
+	cmd.AddCommand(newProjectPullCmd(repoFlag))
+	cmd.AddCommand(newProjectRemoveCmd(repoFlag))
+	cmd.AddCommand(newProjectForgetCmd(repoFlag))
 	return cmd
+}
+
+// projectDir resolves the --dir flag (defaulting to the current working
+// directory). The service layer anchors it at the enclosing git repo root.
+func projectDir(cmd *cobra.Command) (string, error) {
+	dir, _ := cmd.Flags().GetString("dir")
+	if dir == "" {
+		var err error
+		dir, err = os.Getwd()
+		if err != nil {
+			return "", fmt.Errorf("get working directory: %w", err)
+		}
+	}
+
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return "", fmt.Errorf("resolve path %s: %w", dir, err)
+	}
+
+	return absDir, nil
+}
+
+// newProjectInitCmd returns the "project init" subcommand.
+func newProjectInitCmd(repoFlag *string) *cobra.Command {
+	return &cobra.Command{
+		Use:   "init",
+		Short: "Activate project scope for the current repo",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			projectRoot, err := projectDir(cmd)
+			if err != nil {
+				return err
+			}
+
+			ps := service.NewProjectService(svc(repoFlag))
+			created, err := ps.ProjectInit(cmd.Context(), projectRoot)
+			if err != nil {
+				return err
+			}
+
+			if created {
+				_, err = fmt.Fprintln(cmd.OutOrStdout(), "Project scope initialized — global patterns apply. Add repo-local patterns with 'lnk project add <pattern>'.")
+			} else {
+				_, err = fmt.Fprintln(cmd.OutOrStdout(), "Project scope already initialized.")
+			}
+			return err
+		},
+	}
 }
 
 // newProjectAddCmd returns the "project add" subcommand.
 func newProjectAddCmd(repoFlag *string) *cobra.Command {
-	return &cobra.Command{
-		Use:   "add <path...>",
-		Short: "Track project-local files",
+	var global bool
+
+	cmd := &cobra.Command{
+		Use:   "add [--global] <pattern...>",
+		Short: "Add a pattern to .lnkinclude (local unless --global)",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			app := svc(repoFlag)
-			return app.ProjectAdd(cmd.Context(), args)
+			ps := service.NewProjectService(svc(repoFlag))
+
+			if global {
+				for _, pattern := range args {
+					normalized, err := ps.ProjectAddGlobalPattern(pattern)
+					if err != nil {
+						return err
+					}
+					if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Added '%s' to the global .lnkinclude — remember to commit it.\n", normalized); err != nil {
+						return err
+					}
+				}
+				return nil
+			}
+
+			projectRoot, err := projectDir(cmd)
+			if err != nil {
+				return err
+			}
+
+			for _, pattern := range args {
+				normalized, matched, err := ps.ProjectAddPattern(cmd.Context(), projectRoot, pattern)
+				if err != nil {
+					return err
+				}
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Added '%s' to .lnkinclude — remember to commit it.\n", normalized); err != nil {
+					return err
+				}
+				if !matched {
+					if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "warning: '%s' matches no existing files; it will apply to future matches\n", normalized); err != nil {
+						return err
+					}
+				}
+			}
+			return nil
 		},
 	}
+
+	cmd.Flags().BoolVar(&global, "global", false, "add the pattern to the lnk repo's global .lnkinclude")
+	return cmd
+}
+
+// newProjectListCmd returns the "project list" subcommand.
+func newProjectListCmd(repoFlag *string) *cobra.Command {
+	var all bool
+
+	cmd := &cobra.Command{
+		Use:   "list [--all]",
+		Short: "List effective patterns, or all stored projects with --all",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ps := service.NewProjectService(svc(repoFlag))
+
+			if all {
+				projects, err := ps.ProjectListProjects()
+				if err != nil {
+					return err
+				}
+				if len(projects) == 0 {
+					_, err = fmt.Fprintln(cmd.OutOrStdout(), "No stored projects")
+					return err
+				}
+				for _, p := range projects {
+					if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s (%d file(s))\n", p.ID, p.Files); err != nil {
+						return err
+					}
+				}
+				return nil
+			}
+
+			projectRoot, err := projectDir(cmd)
+			if err != nil {
+				return err
+			}
+
+			global, local, err := ps.ProjectListPatterns(cmd.Context(), projectRoot)
+			if err != nil {
+				return err
+			}
+
+			app := svc(repoFlag)
+			globalPath := filepath.Join(app.RepoPath(), ".lnkinclude")
+			localPath := filepath.Join(projectRoot, ".lnkinclude")
+
+			if len(global) > 0 {
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "# global (%s)\n", globalPath); err != nil {
+					return err
+				}
+				for _, p := range global {
+					if _, err := fmt.Fprintln(cmd.OutOrStdout(), p); err != nil {
+						return err
+					}
+				}
+			}
+			if len(global) > 0 && len(local) > 0 {
+				if _, err := fmt.Fprintln(cmd.OutOrStdout()); err != nil {
+					return err
+				}
+			}
+			if len(local) > 0 {
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "# local (%s)\n", localPath); err != nil {
+					return err
+				}
+				for _, p := range local {
+					if _, err := fmt.Fprintln(cmd.OutOrStdout(), p); err != nil {
+						return err
+					}
+				}
+			}
+			if len(global) == 0 && len(local) == 0 {
+				_, err = fmt.Fprintln(cmd.OutOrStdout(), "# no patterns defined")
+			}
+			return err
+		},
+	}
+
+	cmd.Flags().BoolVar(&all, "all", false, "list stored projects instead of patterns")
+	return cmd
+}
+
+// newProjectUntrackCmd returns the "project untrack" subcommand.
+func newProjectUntrackCmd(repoFlag *string) *cobra.Command {
+	var keep bool
+	var global bool
+
+	cmd := &cobra.Command{
+		Use:   "untrack [--keep] [--global] <pattern>",
+		Short: "Remove a pattern from .lnkinclude and unmanage its files",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ps := service.NewProjectService(svc(repoFlag))
+
+			if global {
+				if _, err := ps.ProjectUntrackGlobalPattern(args[0]); err != nil {
+					return err
+				}
+				_, err := fmt.Fprintf(cmd.OutOrStdout(), "Removed '%s' from the global .lnkinclude — remember to commit it.\n", args[0])
+				return err
+			}
+
+			projectRoot, err := projectDir(cmd)
+			if err != nil {
+				return err
+			}
+
+			result, err := ps.ProjectUntrackPattern(cmd.Context(), projectRoot, args[0], keep)
+			if err != nil {
+				return err
+			}
+
+			if result.IsGlobal {
+				app := svc(repoFlag)
+				globalPath := filepath.Join(app.RepoPath(), ".lnkinclude")
+				_, err = fmt.Fprintf(cmd.ErrOrStderr(), "This pattern comes from the global .lnkinclude — edit %s to remove it, or use --global.\n", globalPath)
+				return err
+			}
+
+			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Removed '%s' from .lnkinclude — remember to commit it.\n", args[0]); err != nil {
+				return err
+			}
+			if len(result.Released) > 0 {
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Restored %d file(s) to the project:\n", len(result.Released)); err != nil {
+					return err
+				}
+				for _, path := range result.Released {
+					if _, err := fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", path); err != nil {
+						return err
+					}
+				}
+			}
+			for _, path := range result.BackedUp {
+				if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "warning: existing file backed up to %s.lnk-backup\n", path); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVar(&keep, "keep", false, "only edit .lnkinclude, leaving managed files in place")
+	cmd.Flags().BoolVar(&global, "global", false, "remove the pattern from the lnk repo's global .lnkinclude")
+	return cmd
+}
+
+// newProjectSyncCmd returns the "project sync" subcommand.
+func newProjectSyncCmd(repoFlag *string) *cobra.Command {
+	var dryRun bool
+	var pruneDeletions bool
+	var force bool
+
+	cmd := &cobra.Command{
+		Use:   "sync [--dry-run] [--prune-deletions] [--force]",
+		Short: "Reconcile patterns, live files, and project storage",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			projectRoot, err := projectDir(cmd)
+			if err != nil {
+				return err
+			}
+
+			ps := service.NewProjectService(svc(repoFlag))
+			result, err := ps.ProjectSync(cmd.Context(), projectRoot, dryRun, pruneDeletions, force)
+			if err != nil {
+				return err
+			}
+
+			w := cmd.OutOrStdout()
+			if err := printSyncSection(w, dryRunPrefix(dryRun, "Synced", "Would sync"), result.Synced, "file(s) to project storage"); err != nil {
+				return err
+			}
+			if err := printSyncSection(w, dryRunPrefix(dryRun, "Restored", "Would restore"), result.Released, "file(s) to the project"); err != nil {
+				return err
+			}
+			if err := printSyncSection(w, dryRunPrefix(dryRun, "Backed up", "Would back up"), result.BackedUp, "conflicting file(s)"); err != nil {
+				return err
+			}
+			if err := printSyncSection(w, dryRunPrefix(dryRun, "Pruned", "Would prune"), result.Pruned, "stored file(s) deleted from the project"); err != nil {
+				return err
+			}
+			if len(result.Deletions) > 0 {
+				if _, err := fmt.Fprintf(w, "%d stored file(s) no longer exist in the project (run with --prune-deletions to drop them):\n", len(result.Deletions)); err != nil {
+					return err
+				}
+				for _, path := range result.Deletions {
+					if _, err := fmt.Fprintf(w, "  %s\n", path); err != nil {
+						return err
+					}
+				}
+			}
+			for _, path := range result.SkippedTracked {
+				if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "warning: skipped '%s': tracked by this repo's git (add '!%s' to .lnkinclude, or use --force)\n", path, path); err != nil {
+					return err
+				}
+			}
+
+			if len(result.Synced)+len(result.Released)+len(result.Pruned)+len(result.Deletions) == 0 {
+				_, err = fmt.Fprintln(w, "Project storage is in sync with the effective patterns")
+				return err
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview reconciliation without changing files")
+	cmd.Flags().BoolVar(&pruneDeletions, "prune-deletions", false, "delete stored files whose live copies were deleted")
+	cmd.Flags().BoolVar(&force, "force", false, "also manage files tracked by the project's own git")
+	return cmd
+}
+
+// printSyncSection writes one titled list section of sync output.
+func printSyncSection(w io.Writer, title string, paths []string, suffix string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	if _, err := fmt.Fprintf(w, "%s %d %s:\n", title, len(paths), suffix); err != nil {
+		return err
+	}
+	for _, path := range paths {
+		if _, err := fmt.Fprintf(w, "  %s\n", path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// newProjectRemoveCmd returns the "project remove" subcommand.
+func newProjectRemoveCmd(repoFlag *string) *cobra.Command {
+	return &cobra.Command{
+		Use:   "remove",
+		Short: "Stop managing this project: restore its files and delete storage",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			projectRoot, err := projectDir(cmd)
+			if err != nil {
+				return err
+			}
+
+			ps := service.NewProjectService(svc(repoFlag))
+			result, err := ps.ProjectRemove(cmd.Context(), projectRoot)
+			if err != nil {
+				return err
+			}
+
+			if err := printRestore(cmd.OutOrStdout(), service.RestoreInfo{Restored: result.Restored, BackedUp: result.BackedUp}, false); err != nil {
+				return err
+			}
+			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Removed project storage for %s\n", result.ProjectID); err != nil {
+				return err
+			}
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), ".lnkinclude was left in place; delete it to give up the patterns")
+			return err
+		},
+	}
+}
+
+// newProjectForgetCmd returns the "project forget" subcommand.
+func newProjectForgetCmd(repoFlag *string) *cobra.Command {
+	return &cobra.Command{
+		Use:   "forget",
+		Short: "Stop managing this project but keep its stored files",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			projectRoot, err := projectDir(cmd)
+			if err != nil {
+				return err
+			}
+
+			ps := service.NewProjectService(svc(repoFlag))
+			result, err := ps.ProjectForget(cmd.Context(), projectRoot)
+			if err != nil {
+				return err
+			}
+
+			w := cmd.OutOrStdout()
+			if len(result.Unlinked) == 0 {
+				_, err = fmt.Fprintln(w, "No managed symlinks found")
+			} else {
+				if _, err := fmt.Fprintf(w, "Removed %d symlink(s) from the project:\n", len(result.Unlinked)); err != nil {
+					return err
+				}
+				for _, path := range result.Unlinked {
+					if _, err := fmt.Fprintf(w, "  %s\n", path); err != nil {
+						return err
+					}
+				}
+			}
+			if err != nil {
+				return err
+			}
+			_, err = fmt.Fprintln(w, "Stored files kept; run 'lnk project restore' to bring them back")
+			return err
+		},
+	}
+}
+func newProjectPushCmd(repoFlag *string) *cobra.Command {
+	var force bool
+
+	cmd := &cobra.Command{
+		Use:   "push [--force]",
+		Short: "Push matching project files into lnk storage",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			projectRoot, err := projectDir(cmd)
+			if err != nil {
+				return err
+			}
+
+			ps := service.NewProjectService(svc(repoFlag))
+			result, err := ps.ProjectPush(cmd.Context(), projectRoot, force)
+			if err != nil {
+				return err
+			}
+
+			for _, path := range result.SkippedTracked {
+				if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "warning: skipped '%s': tracked by this repo's git (add '!%s' to .lnkinclude, or use --force)\n", path, path); err != nil {
+					return err
+				}
+			}
+
+			if len(result.Synced) == 0 {
+				if len(result.SkippedTracked) == 0 {
+					_, err = fmt.Fprintln(cmd.OutOrStdout(), "Nothing to sync — all tracked files are already up to date")
+				}
+				return err
+			}
+			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Synced %d file(s) to project storage\n", len(result.Synced)); err != nil {
+				return err
+			}
+			for _, path := range result.Synced {
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", path); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVar(&force, "force", false, "also manage files tracked by the project's own git")
+	return cmd
+}
+
+// newProjectRestoreCmd returns the "project restore" subcommand.
+func newProjectRestoreCmd(repoFlag *string) *cobra.Command {
+	var dryRun bool
+	var force bool
+
+	cmd := &cobra.Command{
+		Use:   "restore [--dry-run] [--force]",
+		Short: "Recreate symlinks for project files from storage",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			projectRoot, err := projectDir(cmd)
+			if err != nil {
+				return err
+			}
+
+			ps := service.NewProjectService(svc(repoFlag))
+			info, err := ps.ProjectRestore(cmd.Context(), projectRoot, dryRun, force)
+			if err != nil {
+				return err
+			}
+			return printRestore(cmd.OutOrStdout(), info, dryRun)
+		},
+	}
+
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview restore actions without changing files")
+	cmd.Flags().BoolVar(&force, "force", false, "replace files tracked by the project's own git")
+	return cmd
+}
+
+// newProjectPullCmd returns the "project pull" subcommand.
+func newProjectPullCmd(repoFlag *string) *cobra.Command {
+	var force bool
+
+	cmd := &cobra.Command{
+		Use:   "pull [--force]",
+		Short: "Pull lnk repo changes and restore project symlinks",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			projectRoot, err := projectDir(cmd)
+			if err != nil {
+				return err
+			}
+
+			ps := service.NewProjectService(svc(repoFlag))
+			info, err := ps.ProjectPull(cmd.Context(), projectRoot, force)
+			if err != nil {
+				return err
+			}
+			if err := printRestore(cmd.OutOrStdout(), info, false); err != nil {
+				return err
+			}
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), "Pulled project changes")
+			return err
+		},
+	}
+
+	cmd.Flags().BoolVar(&force, "force", false, "replace files tracked by the project's own git")
+	return cmd
 }
 
 // newMoveCmd returns the "move" subcommand.
@@ -484,7 +974,7 @@ func newDoctorCmd(repoFlag *string) *cobra.Command {
 	cmd.Flags().StringVar(&host, "host", "", "check one host profile")
 	cmd.Flags().BoolVar(&all, "all", false, "check all storage scopes")
 	cmd.Flags().BoolVar(&fix, "fix", false, "apply safe automatic fixes")
-	cmd.Flags().BoolVar(&pruneEmpty, "prune-empty", false, "remove empty host scopes and their storage directories when passed with --fix")
+	cmd.Flags().BoolVar(&pruneEmpty, "prune-empty", false, "remove empty host scopes and project storage when passed with --fix")
 	cmd.MarkFlagsMutuallyExclusive("all", "host")
 	return cmd
 }
@@ -556,15 +1046,37 @@ func printRestore(w io.Writer, info service.RestoreInfo, dryRun bool) error {
 			return err
 		}
 	}
-	if len(info.BackedUp) == 0 {
+	if len(info.BackedUp) > 0 {
+		if _, err := fmt.Fprintf(w, "%s %d conflicting path(s)\n", backupPrefix, len(info.BackedUp)); err != nil {
+			return err
+		}
+		for _, path := range info.BackedUp {
+			if _, err := fmt.Fprintf(w, "  %s\n", path); err != nil {
+				return err
+			}
+		}
+	}
+	if len(info.SkippedTracked) == 0 && len(info.SkippedUnmatched) == 0 {
 		return nil
 	}
-	if _, err := fmt.Fprintf(w, "%s %d conflicting path(s)\n", backupPrefix, len(info.BackedUp)); err != nil {
-		return err
-	}
-	for _, path := range info.BackedUp {
-		if _, err := fmt.Fprintf(w, "  %s\n", path); err != nil {
+	if len(info.SkippedTracked) > 0 {
+		if _, err := fmt.Fprintf(w, "Skipped %d path(s) tracked by the project's git (use --force to manage them)\n", len(info.SkippedTracked)); err != nil {
 			return err
+		}
+		for _, path := range info.SkippedTracked {
+			if _, err := fmt.Fprintf(w, "  %s\n", path); err != nil {
+				return err
+			}
+		}
+	}
+	if len(info.SkippedUnmatched) > 0 {
+		if _, err := fmt.Fprintf(w, "Skipped %d stored path(s) that no longer match patterns (run 'lnk project sync' to reconcile)\n", len(info.SkippedUnmatched)); err != nil {
+			return err
+		}
+		for _, path := range info.SkippedUnmatched {
+			if _, err := fmt.Fprintf(w, "  %s\n", path); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -597,6 +1109,46 @@ func printDoctor(w io.Writer, report service.DoctorReport) error {
 	for _, result := range report.ScopeResults {
 		if err := result.Print(w); err != nil {
 			return err
+		}
+	}
+	if len(report.Projects) > 0 {
+		if _, err := fmt.Fprintln(w, "Projects:"); err != nil {
+			return err
+		}
+		for _, p := range report.Projects {
+			if _, err := fmt.Fprintf(w, "  %s (%d file(s))\n", p.ID, p.Files); err != nil {
+				return err
+			}
+		}
+	}
+	if len(report.UnmarkedProjects) > 0 {
+		if _, err := fmt.Fprintln(w, "Stored projects without a marker:"); err != nil {
+			return err
+		}
+		for _, p := range report.UnmarkedProjects {
+			if _, err := fmt.Fprintf(w, "  %s\n", p); err != nil {
+				return err
+			}
+		}
+	}
+	if len(report.EmptyProjects) > 0 {
+		if _, err := fmt.Fprintln(w, "Empty project storage:"); err != nil {
+			return err
+		}
+		for _, p := range report.EmptyProjects {
+			if _, err := fmt.Fprintf(w, "  %s\n", p); err != nil {
+				return err
+			}
+		}
+	}
+	if len(report.PrunedProjects) > 0 {
+		if _, err := fmt.Fprintln(w, "Pruned empty project storage:"); err != nil {
+			return err
+		}
+		for _, p := range report.PrunedProjects {
+			if _, err := fmt.Fprintf(w, "  %s\n", p); err != nil {
+				return err
+			}
 		}
 	}
 	if len(report.EmptyScopes) > 0 {

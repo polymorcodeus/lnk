@@ -78,6 +78,12 @@ func (g *Git) runGitCommand(ctx context.Context, timeout time.Duration, args ...
 	return cmd.CombinedOutput()
 }
 
+// Run executes an arbitrary read-only git command against the repository and
+// returns its combined output.
+func (g *Git) Run(ctx context.Context, args ...string) ([]byte, error) {
+	return g.runGitCommand(ctx, shortTimeout, args...)
+}
+
 // Init initializes a new Git repository
 func (g *Git) Init(ctx context.Context) error {
 	// Try using git init -b main first (Git 2.28+)

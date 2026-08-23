@@ -92,7 +92,7 @@ func IsInsideGitRepo(ctx context.Context, absPath string) (bool, string, error) 
 	if err != nil {
 		return false, "", fmt.Errorf("relate %s to git root %s: %w", checkPath, root, err)
 	}
-	if strings.HasPrefix(rel, "..") || rel == "." {
+	if strings.HasPrefix(rel, "..") {
 		return false, "", nil
 	}
 

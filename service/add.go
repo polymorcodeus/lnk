@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/polymorcodeus/lnk/internal/filemanager"
@@ -39,6 +41,14 @@ func (s *Service) Add(ctx context.Context, host string, paths []string) error {
 				return err
 			}
 			if inside {
+				return lnkerror.WithPathAndSuggestion(lnkerror.ErrInsideGitRepo, file.RelativePath, fmt.Sprintf("inside git repo %s; use 'lnk project add' from within the project", gitRoot))
+			}
+		} else if errors.Is(err, os.ErrNotExist) {
+			// The path does not exist (e.g. a glob or ! negation intended for
+			// project scope). If it lives inside a git repo, host scope could
+			// never manage it anyway, so point at the right command.
+			inside, gitRoot, err := gitboundary.IsInsideGitRepo(ctx, filepath.Dir(file.AbsPath))
+			if err == nil && inside {
 				return lnkerror.WithPathAndSuggestion(lnkerror.ErrInsideGitRepo, file.RelativePath, fmt.Sprintf("inside git repo %s; use 'lnk project add' from within the project", gitRoot))
 			}
 		}

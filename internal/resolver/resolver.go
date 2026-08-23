@@ -4,11 +4,14 @@ package resolver
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/url"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -58,4 +61,18 @@ func NormalizeRemoteURL(u string) string {
 	u = strings.TrimSuffix(u, ".git")
 	u = strings.Trim(u, "/")
 	return strings.ToLower(u)
+}
+
+// LocalProjectID returns a deterministic identifier for a repository without
+// an origin remote, derived from the canonical path of the repo root. Local
+// IDs are machine-specific by design: two machines checking out the same
+// local-only repo to different paths produce different IDs.
+func LocalProjectID(root string) string {
+	canonical, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		canonical = root
+	}
+	sum := sha256.Sum256([]byte(canonical))
+	base := strings.ToLower(filepath.Base(canonical))
+	return fmt.Sprintf("local/%s-%s", base, hex.EncodeToString(sum[:])[:8])
 }

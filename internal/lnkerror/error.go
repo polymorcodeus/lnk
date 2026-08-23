@@ -22,6 +22,11 @@ var (
 	ErrInsideGitRepo              = errors.New("file is inside a git repo")
 	ErrOutsideGitRepo             = errors.New("file is outside any git repo")
 	ErrProjectScopeNotImplemented = errors.New("project scope is not yet implemented")
+	ErrNoPatterns                 = errors.New("no patterns defined")
+	ErrIsLnkRepository            = errors.New("directory is the lnk repository")
+	ErrOutsideProject             = errors.New("path is outside the project")
+	ErrEmptyPattern               = errors.New("pattern is empty")
+	ErrSyncFailed                 = errors.New("some files failed to sync")
 )
 
 // Error wraps a sentinel error with optional context for display.

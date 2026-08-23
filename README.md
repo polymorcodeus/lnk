@@ -183,6 +183,55 @@ lnk clone <url> --bootstrap               # runs bootstrap.sh after clone
 lnk bootstrap                             # run manually
 ```
 
+### Project scope
+
+Track project-local configuration files without committing them to the project's own git repository. Useful for `.crush/crush.json`, `.vscode/settings.json`, repo-specific shell aliases, or any file you want backed up in your dotfiles repo but not pushed upstream.
+
+Project scope uses a `.lnkinclude` file inside the project root. Patterns follow `.gitignore` syntax, but a match means "include". Global patterns live in your lnk repo root (`.config/lnk/.lnkinclude`) and apply to every project; local patterns are project-specific and are evaluated after the global ones, so they can negate a global include with `!`.
+
+```bash
+# inside a git repository
+lnk project init                          # create an empty .lnkinclude
+lnk project add .crush/**                 # track all files under .crush/
+lnk project add .vscode/settings.json     # track a single file
+lnk project list                          # show effective global + local patterns
+lnk project list --all                    # list stored projects and file counts
+lnk project push                          # move matches to lnk storage and symlink back
+lnk project sync                          # reconcile patterns, live files, and storage
+lnk project sync --prune-deletions        # also drop storage for files deleted locally
+lnk project restore                       # recreate symlinks from storage
+lnk project restore --dry-run             # preview what would be restored
+lnk project pull                          # pull lnk repo and restore
+lnk project untrack .crush/**             # remove a local pattern and restore its files
+lnk project untrack --keep .crush/**      # remove a pattern but leave files managed
+lnk project remove                        # stop managing the project, restore all files
+lnk project forget                        # stop managing the project, keep stored files
+
+# global patterns (apply to every project)
+lnk project add --global AGENTS.md        # include AGENTS.md everywhere
+lnk project add '!AGENTS.md'              # then exclude it in one project
+lnk project untrack --global AGENTS.md    # remove the global pattern
+```
+
+Matched files are stored under `projects/<normalized-origin>/<path>/` in your lnk repo (derived from the project's origin remote) and symlinked back into the project. Existing files at symlink locations are backed up to `<path>.lnk-backup` during restore, just like host/common scope restores.
+
+### Notes and edge cases
+
+- **Global patterns are hand-managed** (or edited via `--global`): they apply to every project, so negate them per project with a local `!` pattern. Quote the `!` in your shell (`'!AGENTS.md'`) or zsh's history expansion will eat it before lnk sees it.
+- **Files are tracked individually**, not as directory symlinks. A `.todo/` pattern matches every file under it, so new files are picked up by the next `project push`/`project sync`. This differs from `lnk add`, which symlinks a whole directory as one unit.
+- **Files tracked by the project's own git are left alone.** If a match is committed upstream (a typical `AGENTS.md`), push/sync skip it with a warning to avoid replacing a committed file with a machine-local symlink; use `--force` to override.
+- **The lnk repo protects itself.** Project commands refuse to run inside the lnk repository (or any clone of it) to prevent storing it inside its own storage.
+- **Reconciliation is explicit for deletions.** `project sync` reports stored files whose live copies were deleted; they are only removed from storage with `--prune-deletions`.
+
+## Man pages
+
+Man pages are generated from the Cobra command tree and ship with release archives.
+
+```bash
+make man                                  # generate pages in man/
+man man/lnk-project-push.1                # read a generated page
+```
+
 ## Commands
 
 | Command | What it does |
@@ -204,6 +253,16 @@ lnk bootstrap                             # run manually
 | `doctor [--host H \| --all] [--fix] [--prune-empty]` | Audit and fix repo health |
 | `format [--v1 \| --v2]` | Migrate repo format |
 | `bootstrap` | Run bootstrap.sh explicitly |
+| `project init` | Activate project scope in the current git repo |
+| `project add <pattern...>` | Add patterns to the project's `.lnkinclude` |
+| `project list` | Show effective project patterns |
+| `project untrack [--keep] <pattern>` | Remove a pattern from the project's `.lnkinclude`, restoring its files unless `--keep` |
+| `project push [--force]` | Move matching project files to lnk storage |
+| `project sync [--dry-run] [--prune-deletions] [--force]` | Reconcile patterns, live files, and storage |
+| `project restore [--dry-run] [--force]` | Recreate project symlinks from storage |
+| `project pull [--force]` | Pull lnk repo and restore project symlinks |
+| `project remove` | Stop managing the project: restore all files and delete storage |
+| `project forget` | Stop managing the project but keep stored files |
 
 ## Global Options
 
@@ -215,10 +274,9 @@ Available with all commands:
 
 ## Acknowledgements
 
-This originally started off as a fork of [yarlson/lnk](https://github.com/yarlson/lnk) with a number of features that I wanted.
-It has since turned into a standalone version after I saw the plan to rewrite a v2 in Rust. I've cleaned up the legacy code and
-added some opinionated fixes along the way. This should™ be fully compatible with the original repos from yarlson's tool,
-but now stands alone. I can't guarantee backwards or cross compatibility going forward so use both at your own peril.
+This originally started off as a fork of [yarlson/lnk](https://github.com/yarlson/lnk) with a number of features that I wanted. It has since turned into a standalone version after I saw the plan to rewrite a v2 in Rust. I've cleaned up the legacy code and added some opinionated fixes along the way. This should™ be fully compatible with the original repos from yarlson's tool, but now stands alone. I can't guarantee backwards or cross compatibility going forward so use both at your own peril.
+
+The idea of a project scope was born out of seeing [claytercek/offstage](https://github.com/claytercek/offstage). It felt like a good extension of what was already built out here, but I wanted to streamline it and have it fit with the intent I've curated here, namely a targeted working snapshot of my different machine profiles.
 
 ## Contributing
 

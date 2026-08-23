@@ -16,7 +16,7 @@ YELLOW=\033[0;33m
 BLUE=\033[0;34m
 NC=\033[0m # No Color
 
-.PHONY: help build test test-integration clean install uninstall fmt lint vet tidy run dev cross-compile release goreleaser-check goreleaser-snapshot
+.PHONY: help build test test-integration clean install uninstall fmt lint vet tidy run dev man cross-compile release goreleaser-check goreleaser-snapshot
 
 ## help: Show this help message
 help:
@@ -30,6 +30,7 @@ help:
 	@echo "  test-integration Run integration tests"
 	@echo "  run         Run the application"
 	@echo "  dev         Development mode with file watching"
+	@echo "  man         Generate man pages"
 	@echo ""
 	@echo "$(GREEN)Code Quality:$(NC)"
 	@echo "  fmt         Format Go code"
@@ -93,6 +94,12 @@ dev:
 	@echo "$(YELLOW)Development mode - watching for changes...$(NC)"
 	@echo "$(YELLOW)Install 'entr' if not available: brew install entr$(NC)"
 	@find . -name "*.go" | entr -r make run
+
+## man: Generate man pages
+man:
+	@echo "$(BLUE)Generating man pages...$(NC)"
+	@go run ./tools/gen-docs man
+	@echo "$(GREEN)Man pages generated$(NC)"
 
 ## fmt: Format Go code
 fmt:
@@ -160,6 +167,7 @@ clean:
 	@echo "$(BLUE)Cleaning...$(NC)"
 	@rm -f $(BINARY_NAME)
 	@rm -rf dist/
+	@rm -rf man/
 	@rm -f coverage.out coverage.html
 	@echo "$(GREEN)Clean complete$(NC)"
 
