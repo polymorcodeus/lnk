@@ -174,6 +174,9 @@ func (s *Service) findBrokenProjectSymlinks(ctx context.Context) ([]ProjectIssue
 			if err != nil {
 				return nil
 			}
+			if !filepath.IsAbs(target) {
+				target = filepath.Join(filepath.Dir(livePath), target)
+			}
 			if _, err := os.Stat(target); !errors.Is(err, os.ErrNotExist) {
 				return nil
 			}
