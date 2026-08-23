@@ -174,8 +174,11 @@ func newProjectCmd(repoFlag *string) *cobra.Command {
 	cmd.AddCommand(newProjectListCmd(repoFlag))
 	cmd.AddCommand(newProjectUntrackCmd(repoFlag))
 	cmd.AddCommand(newProjectPushCmd(repoFlag))
+	cmd.AddCommand(newProjectSyncCmd(repoFlag))
 	cmd.AddCommand(newProjectRestoreCmd(repoFlag))
 	cmd.AddCommand(newProjectPullCmd(repoFlag))
+	cmd.AddCommand(newProjectRemoveCmd(repoFlag))
+	cmd.AddCommand(newProjectForgetCmd(repoFlag))
 	return cmd
 }
 
@@ -316,9 +319,11 @@ func newProjectListCmd(repoFlag *string) *cobra.Command {
 
 // newProjectUntrackCmd returns the "project untrack" subcommand.
 func newProjectUntrackCmd(repoFlag *string) *cobra.Command {
+	var keep bool
+
 	cmd := &cobra.Command{
-		Use:   "untrack <pattern>",
-		Short: "Remove a pattern from .lnkinclude",
+		Use:   "untrack [--keep] <pattern>",
+		Short: "Remove a pattern from .lnkinclude and unmanage its files",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			projectRoot, err := projectDir(cmd)
@@ -327,25 +332,193 @@ func newProjectUntrackCmd(repoFlag *string) *cobra.Command {
 			}
 
 			ps := service.NewProjectService(svc(repoFlag))
-			removed, isGlobal, err := ps.ProjectUntrackPattern(cmd.Context(), projectRoot, args[0])
+			result, err := ps.ProjectUntrackPattern(cmd.Context(), projectRoot, args[0], keep)
 			if err != nil {
 				return err
 			}
 
-			if removed {
-				_, err = fmt.Fprintf(cmd.OutOrStdout(), "Removed '%s' from .lnkinclude — remember to commit it.\n", args[0])
-			} else if isGlobal {
+			if result.IsGlobal {
 				app := svc(repoFlag)
 				globalPath := filepath.Join(app.RepoPath(), ".lnkinclude")
 				_, err = fmt.Fprintf(cmd.ErrOrStderr(), "This pattern comes from the global .lnkinclude — edit %s to remove it.\n", globalPath)
+				return err
 			}
-			return err
+
+			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Removed '%s' from .lnkinclude — remember to commit it.\n", args[0]); err != nil {
+				return err
+			}
+			if len(result.Released) > 0 {
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Restored %d file(s) to the project:\n", len(result.Released)); err != nil {
+					return err
+				}
+				for _, path := range result.Released {
+					if _, err := fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", path); err != nil {
+						return err
+					}
+				}
+			}
+			for _, path := range result.BackedUp {
+				if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "warning: existing file backed up to %s.lnk-backup\n", path); err != nil {
+					return err
+				}
+			}
+			return nil
 		},
 	}
+
+	cmd.Flags().BoolVar(&keep, "keep", false, "only edit .lnkinclude, leaving managed files in place")
 	return cmd
 }
 
-// newProjectPushCmd returns the "project push" subcommand.
+// newProjectSyncCmd returns the "project sync" subcommand.
+func newProjectSyncCmd(repoFlag *string) *cobra.Command {
+	var dryRun bool
+	var pruneDeletions bool
+	var force bool
+
+	cmd := &cobra.Command{
+		Use:   "sync [--dry-run] [--prune-deletions] [--force]",
+		Short: "Reconcile patterns, live files, and project storage",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			projectRoot, err := projectDir(cmd)
+			if err != nil {
+				return err
+			}
+
+			ps := service.NewProjectService(svc(repoFlag))
+			result, err := ps.ProjectSync(cmd.Context(), projectRoot, dryRun, pruneDeletions, force)
+			if err != nil {
+				return err
+			}
+
+			w := cmd.OutOrStdout()
+			if err := printSyncSection(w, dryRunPrefix(dryRun, "Synced", "Would sync"), result.Synced, "file(s) to project storage"); err != nil {
+				return err
+			}
+			if err := printSyncSection(w, dryRunPrefix(dryRun, "Restored", "Would restore"), result.Released, "file(s) to the project"); err != nil {
+				return err
+			}
+			if err := printSyncSection(w, dryRunPrefix(dryRun, "Backed up", "Would back up"), result.BackedUp, "conflicting file(s)"); err != nil {
+				return err
+			}
+			if err := printSyncSection(w, dryRunPrefix(dryRun, "Pruned", "Would prune"), result.Pruned, "stored file(s) deleted from the project"); err != nil {
+				return err
+			}
+			if len(result.Deletions) > 0 {
+				if _, err := fmt.Fprintf(w, "%d stored file(s) no longer exist in the project (run with --prune-deletions to drop them):\n", len(result.Deletions)); err != nil {
+					return err
+				}
+				for _, path := range result.Deletions {
+					if _, err := fmt.Fprintf(w, "  %s\n", path); err != nil {
+						return err
+					}
+				}
+			}
+			for _, path := range result.SkippedTracked {
+				if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "warning: skipped '%s': tracked by this repo's git (add '!%s' to .lnkinclude, or use --force)\n", path, path); err != nil {
+					return err
+				}
+			}
+
+			if len(result.Synced)+len(result.Released)+len(result.Pruned)+len(result.Deletions) == 0 {
+				_, err = fmt.Fprintln(w, "Project storage is in sync with the effective patterns")
+				return err
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview reconciliation without changing files")
+	cmd.Flags().BoolVar(&pruneDeletions, "prune-deletions", false, "delete stored files whose live copies were deleted")
+	cmd.Flags().BoolVar(&force, "force", false, "also manage files tracked by the project's own git")
+	return cmd
+}
+
+// printSyncSection writes one titled list section of sync output.
+func printSyncSection(w io.Writer, title string, paths []string, suffix string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	if _, err := fmt.Fprintf(w, "%s %d %s:\n", title, len(paths), suffix); err != nil {
+		return err
+	}
+	for _, path := range paths {
+		if _, err := fmt.Fprintf(w, "  %s\n", path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// newProjectRemoveCmd returns the "project remove" subcommand.
+func newProjectRemoveCmd(repoFlag *string) *cobra.Command {
+	return &cobra.Command{
+		Use:   "remove",
+		Short: "Stop managing this project: restore its files and delete storage",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			projectRoot, err := projectDir(cmd)
+			if err != nil {
+				return err
+			}
+
+			ps := service.NewProjectService(svc(repoFlag))
+			result, err := ps.ProjectRemove(cmd.Context(), projectRoot)
+			if err != nil {
+				return err
+			}
+
+			if err := printRestore(cmd.OutOrStdout(), service.RestoreInfo{Restored: result.Restored, BackedUp: result.BackedUp}, false); err != nil {
+				return err
+			}
+			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Removed project storage for %s\n", result.ProjectID); err != nil {
+				return err
+			}
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), ".lnkinclude was left in place; delete it to give up the patterns")
+			return err
+		},
+	}
+}
+
+// newProjectForgetCmd returns the "project forget" subcommand.
+func newProjectForgetCmd(repoFlag *string) *cobra.Command {
+	return &cobra.Command{
+		Use:   "forget",
+		Short: "Stop managing this project but keep its stored files",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			projectRoot, err := projectDir(cmd)
+			if err != nil {
+				return err
+			}
+
+			ps := service.NewProjectService(svc(repoFlag))
+			result, err := ps.ProjectForget(cmd.Context(), projectRoot)
+			if err != nil {
+				return err
+			}
+
+			w := cmd.OutOrStdout()
+			if len(result.Unlinked) == 0 {
+				_, err = fmt.Fprintln(w, "No managed symlinks found")
+			} else {
+				if _, err := fmt.Fprintf(w, "Removed %d symlink(s) from the project:\n", len(result.Unlinked)); err != nil {
+					return err
+				}
+				for _, path := range result.Unlinked {
+					if _, err := fmt.Fprintf(w, "  %s\n", path); err != nil {
+						return err
+					}
+				}
+			}
+			if err != nil {
+				return err
+			}
+			_, err = fmt.Fprintln(w, "Stored files kept; run 'lnk project restore' to bring them back")
+			return err
+		},
+	}
+}
 func newProjectPushCmd(repoFlag *string) *cobra.Command {
 	var force bool
 
@@ -832,15 +1005,27 @@ func printRestore(w io.Writer, info service.RestoreInfo, dryRun bool) error {
 			}
 		}
 	}
-	if len(info.SkippedTracked) == 0 {
+	if len(info.SkippedTracked) == 0 && len(info.SkippedUnmatched) == 0 {
 		return nil
 	}
-	if _, err := fmt.Fprintf(w, "Skipped %d path(s) tracked by the project's git (use --force to manage them)\n", len(info.SkippedTracked)); err != nil {
-		return err
-	}
-	for _, path := range info.SkippedTracked {
-		if _, err := fmt.Fprintf(w, "  %s\n", path); err != nil {
+	if len(info.SkippedTracked) > 0 {
+		if _, err := fmt.Fprintf(w, "Skipped %d path(s) tracked by the project's git (use --force to manage them)\n", len(info.SkippedTracked)); err != nil {
 			return err
+		}
+		for _, path := range info.SkippedTracked {
+			if _, err := fmt.Fprintf(w, "  %s\n", path); err != nil {
+				return err
+			}
+		}
+	}
+	if len(info.SkippedUnmatched) > 0 {
+		if _, err := fmt.Fprintf(w, "Skipped %d stored path(s) that no longer match patterns (run 'lnk project sync' to reconcile)\n", len(info.SkippedUnmatched)); err != nil {
+			return err
+		}
+		for _, path := range info.SkippedUnmatched {
+			if _, err := fmt.Fprintf(w, "  %s\n", path); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

@@ -115,40 +115,116 @@ func (ps *ProjectService) ProjectListPatterns(ctx context.Context, projectRoot s
 	return global, local, nil
 }
 
+// ProjectUntrackResult reports the outcome of ProjectUntrackPattern.
+type ProjectUntrackResult struct {
+	// Removed is true when the pattern was found in (and removed from) the
+	// local .lnkinclude.
+	Removed bool
+	// IsGlobal is true when the pattern only exists in the global
+	// .lnkinclude, which must be edited directly.
+	IsGlobal bool
+	// Released lists stored files moved back to the project because they no
+	// longer match the effective patterns (empty when keep is set).
+	Released []string
+	// BackedUp lists live files renamed to .lnk-backup during release.
+	BackedUp []string
+}
+
 // ProjectUntrackPattern removes a pattern from the project's .lnkinclude at
-// the git root. It returns removed=true when the pattern was removed from
-// the local file. When the pattern exists only in the global file, it
-// returns removed=false and isGlobal=true so the caller can print a warning.
-func (ps *ProjectService) ProjectUntrackPattern(ctx context.Context, projectRoot, pattern string) (removed, isGlobal bool, err error) {
+// the git root. Unless keep is set, stored files that no longer match the
+// effective patterns are moved back to their live paths (mirroring 'lnk
+// remove' for host scope) and the storage change is committed. When the
+// pattern exists only in the global file, IsGlobal is set so the caller can
+// print a warning.
+func (ps *ProjectService) ProjectUntrackPattern(ctx context.Context, projectRoot, pattern string, keep bool) (ProjectUntrackResult, error) {
 	root, err := ps.resolveProjectRoot(ctx, projectRoot)
 	if err != nil {
-		return false, false, err
+		return ProjectUntrackResult{}, err
 	}
 
 	localPath := filepath.Join(root, ".lnkinclude")
 	localLines, err := patterns.Load(localPath)
 	if err != nil {
-		return false, false, fmt.Errorf("load local .lnkinclude: %w", err)
+		return ProjectUntrackResult{}, fmt.Errorf("load local .lnkinclude: %w", err)
 	}
 
-	removed = slices.Contains(localLines, pattern)
-
-	if removed {
-		if err := rewritePatterns(localPath, localLines, pattern); err != nil {
-			return false, false, err
+	// Accept the pattern as written or its normalized form, so 'untrack
+	// .todo/' matches a '.todo' entry relativized at add time (and vice
+	// versa for verbatim glob patterns).
+	target := pattern
+	if !slices.Contains(localLines, target) {
+		if normalized, normErr := normalizePattern(root, pattern); normErr == nil && normalized != pattern {
+			if slices.Contains(localLines, normalized) {
+				target = normalized
+			}
 		}
-		return true, false, nil
 	}
 
+	if !slices.Contains(localLines, target) {
+		global, err := patterns.Load(filepath.Join(ps.svc.RepoPath(), ".lnkinclude"))
+		if err != nil {
+			return ProjectUntrackResult{}, fmt.Errorf("load global .lnkinclude: %w", err)
+		}
+		if slices.Contains(global, target) {
+			return ProjectUntrackResult{IsGlobal: true}, nil
+		}
+		return ProjectUntrackResult{}, lnkerror.WithPath(lnkerror.ErrNotManaged, pattern)
+	}
+
+	if err := rewritePatterns(localPath, localLines, target); err != nil {
+		return ProjectUntrackResult{}, err
+	}
+	result := ProjectUntrackResult{Removed: true}
+
+	if keep {
+		return result, nil
+	}
+
+	effective, err := ps.effectivePatterns(root)
+	if err != nil {
+		return result, err
+	}
+	released, backedUp, err := ps.releaseUnmatched(ctx, root, effective, false)
+	if err != nil {
+		return result, err
+	}
+	result.Released = released
+	result.BackedUp = backedUp
+
+	if len(released) > 0 {
+		id, err := ps.projectID(ctx, root)
+		if err != nil {
+			return result, err
+		}
+		if err := ps.svc.git.AddAll(ctx); err != nil {
+			return result, err
+		}
+		hasChanges, err := ps.svc.git.HasChanges(ctx)
+		if err != nil {
+			return result, err
+		}
+		if hasChanges {
+			if err := ps.svc.commit(ctx, "lnk: untracked '"+target+"' in project "+id); err != nil {
+				return result, err
+			}
+		}
+	}
+
+	return result, nil
+}
+
+// effectivePatterns returns the combined global and local pattern lists.
+// Local entries come last so they can negate global ones.
+func (ps *ProjectService) effectivePatterns(root string) ([]string, error) {
 	global, err := patterns.Load(filepath.Join(ps.svc.RepoPath(), ".lnkinclude"))
 	if err != nil {
-		return false, false, fmt.Errorf("load global .lnkinclude: %w", err)
+		return nil, fmt.Errorf("load global .lnkinclude: %w", err)
 	}
-	if slices.Contains(global, pattern) {
-		return false, true, nil
+	local, err := patterns.Load(filepath.Join(root, ".lnkinclude"))
+	if err != nil {
+		return nil, fmt.Errorf("load local .lnkinclude: %w", err)
 	}
-
-	return false, false, lnkerror.WithPath(lnkerror.ErrNotManaged, pattern)
+	return slices.Concat(global, local), nil
 }
 
 // resolveProjectRoot anchors a project command at the root of the git
@@ -441,36 +517,15 @@ func (ps *ProjectService) ProjectPush(ctx context.Context, projectRoot string, f
 		return ProjectPushResult{}, err
 	}
 
-	result := ProjectPushResult{ProjectID: id}
-	fs := &fspkg.FileSystem{}
-	var failed []error
-
-	err = walkProjectFiles(root, func(path, rel string) error {
-		if implicitlyExcluded(rel) {
-			return nil
-		}
-		match, err := patterns.Match(effective, rel)
-		if err != nil {
-			return err
-		}
-		if !match {
-			return nil
-		}
-		if !force {
-			if _, ok := tracked[rel]; ok {
-				result.SkippedTracked = append(result.SkippedTracked, rel)
-				return nil
-			}
-		}
-		if err := moveToStorage(fs, path, filepath.Join(storageDir, filepath.FromSlash(rel))); err != nil {
-			failed = append(failed, fmt.Errorf("%s: %w", rel, err))
-			return nil
-		}
-		result.Synced = append(result.Synced, rel)
-		return nil
-	})
+	stats, err := syncNewMatches(&fspkg.FileSystem{}, root, storageDir, effective, tracked, force, false)
 	if err != nil {
-		return result, err
+		return ProjectPushResult{}, err
+	}
+
+	result := ProjectPushResult{
+		ProjectID:      id,
+		Synced:         stats.synced,
+		SkippedTracked: stats.skippedTracked,
 	}
 
 	if err := ps.svc.git.AddAll(ctx); err != nil {
@@ -487,8 +542,8 @@ func (ps *ProjectService) ProjectPush(ctx context.Context, projectRoot string, f
 		}
 	}
 
-	if len(failed) > 0 {
-		return result, fmt.Errorf("%w: %w", lnkerror.ErrSyncFailed, errors.Join(failed...))
+	if len(stats.failed) > 0 {
+		return result, fmt.Errorf("%w: %w", lnkerror.ErrSyncFailed, errors.Join(stats.failed...))
 	}
 
 	return result, nil
@@ -510,6 +565,475 @@ func moveToStorage(fs *fspkg.FileSystem, livePath, storagePath string) error {
 		return fmt.Errorf("create symlink: %w", err)
 	}
 	return nil
+}
+
+// matchSyncStats accumulates the outcome of syncNewMatches.
+type matchSyncStats struct {
+	synced         []string
+	skippedTracked []string
+	failed         []error
+}
+
+// syncNewMatches moves live files matching the effective patterns into
+// storage and symlinks them back (project reconciliation class 1: newly
+// matched files). Files tracked by the project's own git are skipped unless
+// force is set. In dryRun mode matches are reported but not moved and move
+// failures are collected per file rather than aborting the walk.
+func syncNewMatches(fs *fspkg.FileSystem, root, storageDir string, effective []string, tracked map[string]struct{}, force, dryRun bool) (matchSyncStats, error) {
+	var stats matchSyncStats
+	err := walkProjectFiles(root, func(path, rel string) error {
+		if implicitlyExcluded(rel) {
+			return nil
+		}
+		match, err := patterns.Match(effective, rel)
+		if err != nil {
+			return err
+		}
+		if !match {
+			return nil
+		}
+		if !force {
+			if _, ok := tracked[rel]; ok {
+				stats.skippedTracked = append(stats.skippedTracked, rel)
+				return nil
+			}
+		}
+		if dryRun {
+			stats.synced = append(stats.synced, rel)
+			return nil
+		}
+		if err := moveToStorage(fs, path, filepath.Join(storageDir, filepath.FromSlash(rel))); err != nil {
+			stats.failed = append(stats.failed, fmt.Errorf("%s: %w", rel, err))
+			return nil
+		}
+		stats.synced = append(stats.synced, rel)
+		return nil
+	})
+	return stats, err
+}
+
+// releaseFile moves a stored file back to its live path. A symlink pointing
+// into storageDir is simply removed; any other existing live file (or a
+// foreign symlink) is first renamed to .lnk-backup. It reports whether a
+// backup was made.
+func releaseFile(fs *fspkg.FileSystem, storagePath, livePath, storageDir string) (backedUp bool, err error) {
+	if liveInfo, statErr := os.Lstat(livePath); statErr == nil {
+		if liveInfo.Mode()&os.ModeSymlink != 0 && isStorageSymlink(livePath, storageDir) {
+			if err := os.Remove(livePath); err != nil {
+				return false, fmt.Errorf("remove managed symlink: %w", err)
+			}
+		} else {
+			backupPath := livePath + ".lnk-backup"
+			if _, err := os.Lstat(backupPath); err == nil {
+				return false, lnkerror.WithPath(lnkerror.ErrBackupExists, backupPath)
+			}
+			if err := os.Rename(livePath, backupPath); err != nil {
+				return false, fmt.Errorf("backup existing file %s: %w", livePath, err)
+			}
+			backedUp = true
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(livePath), 0o755); err != nil {
+		return false, fmt.Errorf("create live parent directory: %w", err)
+	}
+	if err := fs.MoveFile(storagePath, livePath); err != nil {
+		return false, fmt.Errorf("restore live file: %w", err)
+	}
+	return backedUp, nil
+}
+
+// isStorageSymlink reports whether livePath is a symlink whose target lies
+// inside storageDir.
+func isStorageSymlink(livePath, storageDir string) bool {
+	target, err := os.Readlink(livePath)
+	if err != nil {
+		return false
+	}
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(filepath.Dir(livePath), target)
+	}
+	target = filepath.Clean(target)
+	rel, err := filepath.Rel(storageDir, target)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// releaseUnmatched moves stored files that no longer match the effective
+// patterns back to their live paths (project reconciliation class 2: pattern
+// drift). In dryRun mode the affected paths are reported but not moved.
+func (ps *ProjectService) releaseUnmatched(ctx context.Context, root string, effective []string, dryRun bool) (released, backedUp []string, err error) {
+	id, err := ps.projectID(ctx, root)
+	if err != nil {
+		return nil, nil, err
+	}
+	storageDir := filepath.Join(ps.svc.RepoPath(), "projects", id)
+	if _, err := os.Stat(storageDir); err != nil {
+		return nil, nil, nil
+	}
+
+	fs := &fspkg.FileSystem{}
+	var failed []error
+
+	err = filepath.Walk(storageDir, func(path string, fi os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if fi.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(storageDir, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+
+		match, err := patterns.Match(effective, rel)
+		if err != nil {
+			return err
+		}
+		if match {
+			return nil
+		}
+
+		if dryRun {
+			released = append(released, rel)
+			return nil
+		}
+		backed, err := releaseFile(fs, path, filepath.Join(root, filepath.FromSlash(rel)), storageDir)
+		if err != nil {
+			failed = append(failed, fmt.Errorf("%s: %w", rel, err))
+			return nil
+		}
+		released = append(released, rel)
+		if backed {
+			backedUp = append(backedUp, rel)
+		}
+		return nil
+	})
+	if err != nil {
+		return released, backedUp, err
+	}
+
+	if !dryRun {
+		if err := fspkg.RemoveEmptyDirs(storageDir); err != nil {
+			return released, backedUp, fmt.Errorf("prune empty storage directories: %w", err)
+		}
+	}
+
+	if len(failed) > 0 {
+		return released, backedUp, fmt.Errorf("%w: %w", lnkerror.ErrSyncFailed, errors.Join(failed...))
+	}
+	return released, backedUp, nil
+}
+
+// liveDeletions finds stored files that still match the effective patterns
+// but whose live paths have gone missing (project reconciliation class 3).
+// When prune is set their storage copies are deleted; otherwise they are
+// only reported. In dryRun mode nothing is deleted.
+func (ps *ProjectService) liveDeletions(ctx context.Context, root string, effective []string, dryRun, prune bool) (deletions, pruned []string, err error) {
+	id, err := ps.projectID(ctx, root)
+	if err != nil {
+		return nil, nil, err
+	}
+	storageDir := filepath.Join(ps.svc.RepoPath(), "projects", id)
+	if _, err := os.Stat(storageDir); err != nil {
+		return nil, nil, nil
+	}
+
+	err = filepath.Walk(storageDir, func(path string, fi os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if fi.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(storageDir, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+
+		match, err := patterns.Match(effective, rel)
+		if err != nil {
+			return err
+		}
+		if !match {
+			return nil
+		}
+
+		if _, err := os.Lstat(filepath.Join(root, filepath.FromSlash(rel))); err == nil {
+			return nil
+		}
+
+		if prune {
+			pruned = append(pruned, rel)
+			if !dryRun {
+				if err := os.Remove(path); err != nil {
+					return fmt.Errorf("prune stored file %s: %w", rel, err)
+				}
+			}
+			return nil
+		}
+		deletions = append(deletions, rel)
+		return nil
+	})
+	if err != nil {
+		return deletions, pruned, err
+	}
+
+	if prune && !dryRun {
+		if err := fspkg.RemoveEmptyDirs(storageDir); err != nil {
+			return deletions, pruned, fmt.Errorf("prune empty storage directories: %w", err)
+		}
+	}
+	return deletions, pruned, nil
+}
+
+// ProjectSyncResult reports the reconciliation outcome of ProjectSync.
+type ProjectSyncResult struct {
+	ProjectID string
+	// Synced lists live files newly moved to storage and symlinked back.
+	Synced []string
+	// Released lists stored files moved back to the project because their
+	// patterns no longer match.
+	Released []string
+	// BackedUp lists live files renamed to .lnk-backup during release.
+	BackedUp []string
+	// Deletions lists stored files whose live copies are gone (kept unless
+	// pruneDeletions is set).
+	Deletions []string
+	// Pruned lists stored files deleted because their live copies are gone.
+	Pruned []string
+	// SkippedTracked lists matched files left untouched because the
+	// project's own git index tracks them.
+	SkippedTracked []string
+}
+
+// ProjectSync reconciles live files, stored files, and the effective
+// patterns in both directions: newly matched files are pushed to storage,
+// files whose patterns no longer match are moved back to the project, and
+// stored files whose live copies were deleted are reported (or pruned with
+// pruneDeletions). Storage changes are staged and committed in the lnk repo.
+func (ps *ProjectService) ProjectSync(ctx context.Context, projectRoot string, dryRun, pruneDeletions, force bool) (ProjectSyncResult, error) {
+	root, err := ps.resolveProjectRoot(ctx, projectRoot)
+	if err != nil {
+		return ProjectSyncResult{}, err
+	}
+
+	id, err := ps.projectID(ctx, root)
+	if err != nil {
+		return ProjectSyncResult{}, err
+	}
+
+	storageDir := filepath.Join(ps.svc.RepoPath(), "projects", id)
+	if !dryRun {
+		if err := os.MkdirAll(storageDir, 0o755); err != nil {
+			return ProjectSyncResult{}, fmt.Errorf("create project storage: %w", err)
+		}
+	}
+
+	effective, err := ps.effectivePatterns(root)
+	if err != nil {
+		return ProjectSyncResult{}, err
+	}
+
+	tracked, err := projectTrackedFiles(ctx, root)
+	if err != nil {
+		return ProjectSyncResult{}, err
+	}
+
+	result := ProjectSyncResult{ProjectID: id}
+
+	stats, err := syncNewMatches(&fspkg.FileSystem{}, root, storageDir, effective, tracked, force, dryRun)
+	if err != nil {
+		return result, err
+	}
+	result.Synced = stats.synced
+	result.SkippedTracked = stats.skippedTracked
+
+	result.Released, result.BackedUp, err = ps.releaseUnmatched(ctx, root, effective, dryRun)
+	if err != nil {
+		return result, err
+	}
+
+	result.Deletions, result.Pruned, err = ps.liveDeletions(ctx, root, effective, dryRun, pruneDeletions)
+	if err != nil {
+		return result, err
+	}
+
+	if !dryRun {
+		if err := ps.svc.git.AddAll(ctx); err != nil {
+			return result, err
+		}
+		hasChanges, err := ps.svc.git.HasChanges(ctx)
+		if err != nil {
+			return result, err
+		}
+		if hasChanges {
+			if err := ps.svc.commit(ctx, "lnk: sync project "+id); err != nil {
+				return result, err
+			}
+		}
+	}
+
+	if len(stats.failed) > 0 {
+		return result, fmt.Errorf("%w: %w", lnkerror.ErrSyncFailed, errors.Join(stats.failed...))
+	}
+
+	return result, nil
+}
+
+// ProjectRemoveResult reports the outcome of ProjectRemove.
+type ProjectRemoveResult struct {
+	ProjectID string
+	// Restored lists files moved back from storage to their live paths.
+	Restored []string
+	// BackedUp lists live files renamed to .lnk-backup during the move-back.
+	BackedUp []string
+}
+
+// ProjectRemove stops managing the whole project: every stored file is moved
+// back to its live path (existing live files are backed up first), the
+// project's storage directory is deleted, and the removal is committed in
+// the lnk repo. The project's .lnkinclude is left in place so the project
+// can be re-adopted later with 'lnk project push'.
+func (ps *ProjectService) ProjectRemove(ctx context.Context, projectRoot string) (ProjectRemoveResult, error) {
+	root, err := ps.resolveProjectRoot(ctx, projectRoot)
+	if err != nil {
+		return ProjectRemoveResult{}, err
+	}
+
+	id, err := ps.projectID(ctx, root)
+	if err != nil {
+		return ProjectRemoveResult{}, err
+	}
+
+	storageDir := filepath.Join(ps.svc.RepoPath(), "projects", id)
+	if _, err := os.Stat(storageDir); err != nil {
+		return ProjectRemoveResult{}, lnkerror.WithPathAndSuggestion(lnkerror.ErrNotManaged, root, "no stored files for this project")
+	}
+
+	result := ProjectRemoveResult{ProjectID: id}
+	fs := &fspkg.FileSystem{}
+	var failed []error
+
+	err = filepath.Walk(storageDir, func(path string, fi os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if fi.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(storageDir, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+
+		backed, err := releaseFile(fs, path, filepath.Join(root, filepath.FromSlash(rel)), storageDir)
+		if err != nil {
+			failed = append(failed, fmt.Errorf("%s: %w", rel, err))
+			return nil
+		}
+		result.Restored = append(result.Restored, rel)
+		if backed {
+			result.BackedUp = append(result.BackedUp, rel)
+		}
+		return nil
+	})
+	if err != nil {
+		return result, err
+	}
+
+	// Keep the storage directory (and skip the commit) when some files could
+	// not be moved back, so nothing is lost.
+	if len(failed) > 0 {
+		return result, fmt.Errorf("%w: %w", lnkerror.ErrSyncFailed, errors.Join(failed...))
+	}
+
+	if err := os.RemoveAll(storageDir); err != nil {
+		return result, fmt.Errorf("remove project storage: %w", err)
+	}
+
+	if err := ps.svc.git.AddAll(ctx); err != nil {
+		return result, err
+	}
+	hasChanges, err := ps.svc.git.HasChanges(ctx)
+	if err != nil {
+		return result, err
+	}
+	if hasChanges {
+		if err := ps.svc.commit(ctx, "lnk: removed project "+id); err != nil {
+			return result, err
+		}
+	}
+
+	return result, nil
+}
+
+// ProjectForgetResult reports the outcome of ProjectForget.
+type ProjectForgetResult struct {
+	ProjectID string
+	// Unlinked lists live symlinks pointing into project storage that were
+	// removed.
+	Unlinked []string
+}
+
+// ProjectForget stops managing the whole project but keeps its stored files:
+// live symlinks pointing into the project's storage are removed while the
+// storage copy (and .lnkinclude) stay in place, so 'lnk project restore' can
+// bring the files back later. Live real files are never touched.
+func (ps *ProjectService) ProjectForget(ctx context.Context, projectRoot string) (ProjectForgetResult, error) {
+	root, err := ps.resolveProjectRoot(ctx, projectRoot)
+	if err != nil {
+		return ProjectForgetResult{}, err
+	}
+
+	id, err := ps.projectID(ctx, root)
+	if err != nil {
+		return ProjectForgetResult{}, err
+	}
+
+	storageDir := filepath.Join(ps.svc.RepoPath(), "projects", id)
+	if _, err := os.Stat(storageDir); err != nil {
+		return ProjectForgetResult{}, lnkerror.WithPathAndSuggestion(lnkerror.ErrNotManaged, root, "no stored files for this project")
+	}
+
+	result := ProjectForgetResult{ProjectID: id}
+
+	err = filepath.Walk(storageDir, func(path string, fi os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if fi.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(storageDir, path)
+		if err != nil {
+			return err
+		}
+
+		livePath := filepath.Join(root, filepath.FromSlash(filepath.ToSlash(rel)))
+		liveInfo, statErr := os.Lstat(livePath)
+		if statErr != nil || liveInfo.Mode()&os.ModeSymlink == 0 {
+			return nil
+		}
+		if !isStorageSymlink(livePath, storageDir) {
+			return nil
+		}
+		if err := os.Remove(livePath); err != nil {
+			return fmt.Errorf("remove managed symlink %s: %w", livePath, err)
+		}
+		result.Unlinked = append(result.Unlinked, filepath.ToSlash(rel))
+		return nil
+	})
+	if err != nil {
+		return result, err
+	}
+
+	return result, nil
 }
 
 // ProjectRestore recreates symlinks for all project-scoped files from
@@ -538,6 +1062,11 @@ func (ps *ProjectService) ProjectRestore(ctx context.Context, projectRoot string
 		return RestoreInfo{}, err
 	}
 
+	effective, err := ps.effectivePatterns(root)
+	if err != nil {
+		return RestoreInfo{}, err
+	}
+
 	r := &scope.ProjectRootResolver{
 		GitRoot:    root,
 		StorageDir: storageDir,
@@ -559,6 +1088,17 @@ func (ps *ProjectService) ProjectRestore(ctx context.Context, projectRoot string
 			return err
 		}
 		rel = filepath.ToSlash(rel)
+
+		// Stored files whose patterns no longer match are drift, not state to
+		// recreate; 'lnk project sync' moves them back.
+		match, err := patterns.Match(effective, rel)
+		if err != nil {
+			return err
+		}
+		if !match {
+			info.SkippedUnmatched = append(info.SkippedUnmatched, rel)
+			return nil
+		}
 
 		livePath, err := r.ToLive(rel)
 		if err != nil {

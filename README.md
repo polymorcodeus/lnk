@@ -196,10 +196,14 @@ lnk project add .crush/**                 # track all files under .crush/
 lnk project add .vscode/settings.json     # track a single file
 lnk project list                          # show effective global + local patterns
 lnk project push                          # move matches to lnk storage and symlink back
+lnk project sync                          # reconcile patterns, live files, and storage
 lnk project restore                       # recreate symlinks from storage
 lnk project restore --dry-run             # preview what would be restored
 lnk project pull                          # pull lnk repo and restore
-lnk project untrack .crush/**             # remove a local pattern
+lnk project untrack .crush/**             # remove a local pattern and restore its files
+lnk project untrack --keep .crush/**      # remove a pattern but leave files managed
+lnk project remove                        # stop managing the project, restore all files
+lnk project forget                        # stop managing the project, keep stored files
 ```
 
 Matched files are stored under `projects/<normalized-origin>/<path>/` in your lnk repo (derived from the project's origin remote) and symlinked back into the project. Existing files at symlink locations are backed up to `<path>.lnk-backup` during restore, just like host/common scope restores.
@@ -237,10 +241,13 @@ man man/lnk-project-push.1                # read a generated page
 | `project init` | Activate project scope in the current git repo |
 | `project add <pattern...>` | Add patterns to the project's `.lnkinclude` |
 | `project list` | Show effective project patterns |
-| `project untrack <pattern>` | Remove a pattern from the project's `.lnkinclude` |
-| `project push` | Move matching project files to lnk storage |
-| `project restore [--dry-run]` | Recreate project symlinks from storage |
-| `project pull` | Pull lnk repo and restore project symlinks |
+| `project untrack [--keep] <pattern>` | Remove a pattern from the project's `.lnkinclude`, restoring its files unless `--keep` |
+| `project push [--force]` | Move matching project files to lnk storage |
+| `project sync [--dry-run] [--prune-deletions] [--force]` | Reconcile patterns, live files, and storage |
+| `project restore [--dry-run] [--force]` | Recreate project symlinks from storage |
+| `project pull [--force]` | Pull lnk repo and restore project symlinks |
+| `project remove` | Stop managing the project: restore all files and delete storage |
+| `project forget` | Stop managing the project but keep stored files |
 
 ## Global Options
 

@@ -79,6 +79,9 @@ type RestoreInfo struct {
 	// SkippedTracked lists project-scope paths left untouched because the
 	// project's own git index tracks them (requires force to manage).
 	SkippedTracked []string
+	// SkippedUnmatched lists stored project-scope paths whose patterns no
+	// longer match (run 'lnk project sync' to reconcile).
+	SkippedUnmatched []string
 }
 
 // OwnershipCollision describes a path claimed by more than one scope.

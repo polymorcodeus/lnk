@@ -139,11 +139,20 @@ func TestProjectCommands_RefuseLnkRepository(t *testing.T) {
 		if _, _, err := ps.ProjectListPatterns(context.Background(), dir); !errors.Is(err, lnkerror.ErrIsLnkRepository) {
 			t.Errorf("ProjectListPatterns(%s) error = %v, want %v", dir, err, lnkerror.ErrIsLnkRepository)
 		}
-		if _, _, err := ps.ProjectUntrackPattern(context.Background(), dir, "x"); !errors.Is(err, lnkerror.ErrIsLnkRepository) {
+		if _, err := ps.ProjectUntrackPattern(context.Background(), dir, "x", true); !errors.Is(err, lnkerror.ErrIsLnkRepository) {
 			t.Errorf("ProjectUntrackPattern(%s) error = %v, want %v", dir, err, lnkerror.ErrIsLnkRepository)
 		}
 		if _, err := ps.ProjectRestore(context.Background(), dir, false, false); !errors.Is(err, lnkerror.ErrIsLnkRepository) {
 			t.Errorf("ProjectRestore(%s) error = %v, want %v", dir, err, lnkerror.ErrIsLnkRepository)
+		}
+		if _, err := ps.ProjectSync(context.Background(), dir, false, false, false); !errors.Is(err, lnkerror.ErrIsLnkRepository) {
+			t.Errorf("ProjectSync(%s) error = %v, want %v", dir, err, lnkerror.ErrIsLnkRepository)
+		}
+		if _, err := ps.ProjectRemove(context.Background(), dir); !errors.Is(err, lnkerror.ErrIsLnkRepository) {
+			t.Errorf("ProjectRemove(%s) error = %v, want %v", dir, err, lnkerror.ErrIsLnkRepository)
+		}
+		if _, err := ps.ProjectForget(context.Background(), dir); !errors.Is(err, lnkerror.ErrIsLnkRepository) {
+			t.Errorf("ProjectForget(%s) error = %v, want %v", dir, err, lnkerror.ErrIsLnkRepository)
 		}
 	}
 }
@@ -400,14 +409,14 @@ func TestProjectUntrackPattern_RemovesLocal(t *testing.T) {
 		t.Fatalf("add: %v", err)
 	}
 
-	removed, isGlobal, err := ps.ProjectUntrackPattern(context.Background(), repoDir, "agents.md")
+	result, err := ps.ProjectUntrackPattern(context.Background(), repoDir, "agents.md", true)
 	if err != nil {
 		t.Fatalf("ProjectUntrackPattern: %v", err)
 	}
-	if !removed {
+	if !result.Removed {
 		t.Error("expected removed=true")
 	}
-	if isGlobal {
+	if result.IsGlobal {
 		t.Error("expected isGlobal=false")
 	}
 }
@@ -424,14 +433,14 @@ func TestProjectUntrackPattern_WarnsForGlobal(t *testing.T) {
 	}
 
 	ps := service.NewProjectService(svc)
-	removed, isGlobal, err := ps.ProjectUntrackPattern(context.Background(), repoDir, ".todo/**")
+	result, err := ps.ProjectUntrackPattern(context.Background(), repoDir, ".todo/**", true)
 	if err != nil {
 		t.Fatalf("ProjectUntrackPattern: %v", err)
 	}
-	if removed {
+	if result.Removed {
 		t.Error("expected removed=false")
 	}
-	if !isGlobal {
+	if !result.IsGlobal {
 		t.Error("expected isGlobal=true")
 	}
 }
@@ -443,7 +452,7 @@ func TestProjectUntrackPattern_ErrorsWhenMissing(t *testing.T) {
 	initProjectRepo(t, repoDir)
 
 	ps := service.NewProjectService(svc)
-	_, _, err := ps.ProjectUntrackPattern(context.Background(), repoDir, "missing.md")
+	_, err := ps.ProjectUntrackPattern(context.Background(), repoDir, "missing.md", true)
 	if err == nil {
 		t.Fatal("expected error for missing pattern")
 	}
@@ -990,4 +999,463 @@ func TestProjectPull_PullsAndRestores(t *testing.T) {
 		t.Errorf("restored = %v, want 1 entry", info.Restored)
 	}
 	testhelpers.AssertSymlink(t, liveFile, storageFile)
+}
+
+// ---------- Lifecycle and reconciliation ----------
+
+// newPushedProject creates a project repo with an origin remote, adds the
+// pattern, creates the given files (slash-separated, root-relative), and
+// pushes. It returns the lnk service, project service, repo dir, and
+// project id.
+func newPushedProject(t *testing.T, pattern string, files ...string) (*service.Service, *service.ProjectService, string, string) {
+	t.Helper()
+	svc, home := testhelpers.TestHome(t)
+	repoDir := filepath.Join(home, "repos", "hermes")
+	testhelpers.MakeDir(t, repoDir)
+	initProjectRepo(t, repoDir)
+
+	ps := service.NewProjectService(svc)
+	if _, _, err := ps.ProjectAddPattern(context.Background(), repoDir, pattern); err != nil {
+		t.Fatalf("add pattern: %v", err)
+	}
+	for _, rel := range files {
+		testhelpers.MakeFile(t, filepath.Join(repoDir, filepath.FromSlash(rel)), "content of "+rel+"\n")
+	}
+	result, err := ps.ProjectPush(context.Background(), repoDir, false)
+	if err != nil {
+		t.Fatalf("ProjectPush: %v", err)
+	}
+	return svc, ps, repoDir, result.ProjectID
+}
+
+func assertRealFile(t *testing.T, path, wantContent string) {
+	t.Helper()
+	info, err := os.Lstat(path)
+	if err != nil {
+		t.Fatalf("expected real file at %s: %v", path, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Errorf("expected %s to be a real file, got symlink", path)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != wantContent {
+		t.Errorf("content of %s = %q, want %q", path, data, wantContent)
+	}
+}
+
+func TestProjectUntrackPattern_ReleasesNowUnmatchedFiles(t *testing.T) {
+	svc, ps, repoDir, id := newPushedProject(t, ".todo/**", ".todo/a.md", ".todo/b.md")
+	storageDir := filepath.Join(svc.RepoPath(), "projects", id)
+
+	result, err := ps.ProjectUntrackPattern(context.Background(), repoDir, ".todo/**", false)
+	if err != nil {
+		t.Fatalf("ProjectUntrackPattern: %v", err)
+	}
+	if !result.Removed {
+		t.Error("expected removed=true")
+	}
+	if len(result.Released) != 2 {
+		t.Errorf("released = %v, want 2 entries", result.Released)
+	}
+
+	assertRealFile(t, filepath.Join(repoDir, ".todo", "a.md"), "content of .todo/a.md\n")
+	assertRealFile(t, filepath.Join(repoDir, ".todo", "b.md"), "content of .todo/b.md\n")
+	if testhelpers.FileExists(t, filepath.Join(storageDir, ".todo")) {
+		t.Error("expected .todo storage to be pruned")
+	}
+}
+
+func TestProjectUntrackPattern_KeepLeavesFilesManaged(t *testing.T) {
+	svc, ps, repoDir, id := newPushedProject(t, ".todo/**", ".todo/a.md")
+	storageFile := filepath.Join(svc.RepoPath(), "projects", id, ".todo", "a.md")
+	liveFile := filepath.Join(repoDir, ".todo", "a.md")
+
+	result, err := ps.ProjectUntrackPattern(context.Background(), repoDir, ".todo/**", true)
+	if err != nil {
+		t.Fatalf("ProjectUntrackPattern: %v", err)
+	}
+	if !result.Removed {
+		t.Error("expected removed=true")
+	}
+	if len(result.Released) != 0 {
+		t.Errorf("released = %v, want empty with keep", result.Released)
+	}
+	testhelpers.AssertSymlink(t, liveFile, storageFile)
+	if !testhelpers.FileExists(t, storageFile) {
+		t.Error("expected storage copy to remain")
+	}
+}
+
+func TestProjectUntrackPattern_KeepsStillMatchedFiles(t *testing.T) {
+	svc, home := testhelpers.TestHome(t)
+	repoDir := filepath.Join(home, "repos", "hermes")
+	testhelpers.MakeDir(t, repoDir)
+	initProjectRepo(t, repoDir)
+
+	ps := service.NewProjectService(svc)
+	for _, pattern := range []string{"*.md", "notes.md"} {
+		if _, _, err := ps.ProjectAddPattern(context.Background(), repoDir, pattern); err != nil {
+			t.Fatalf("add %s: %v", pattern, err)
+		}
+	}
+	testhelpers.MakeFile(t, filepath.Join(repoDir, "notes.md"), "notes\n")
+	testhelpers.MakeFile(t, filepath.Join(repoDir, "other.md"), "other\n")
+	result, err := ps.ProjectPush(context.Background(), repoDir, false)
+	if err != nil {
+		t.Fatalf("ProjectPush: %v", err)
+	}
+	storageDir := filepath.Join(svc.RepoPath(), "projects", result.ProjectID)
+
+	untrack, err := ps.ProjectUntrackPattern(context.Background(), repoDir, "*.md", false)
+	if err != nil {
+		t.Fatalf("ProjectUntrackPattern: %v", err)
+	}
+	if len(untrack.Released) != 1 || untrack.Released[0] != "other.md" {
+		t.Errorf("released = %v, want [other.md]", untrack.Released)
+	}
+
+	// notes.md is still matched by its dedicated pattern.
+	testhelpers.AssertSymlink(t, filepath.Join(repoDir, "notes.md"), filepath.Join(storageDir, "notes.md"))
+	assertRealFile(t, filepath.Join(repoDir, "other.md"), "other\n")
+}
+
+func TestProjectSync_PatternDrift(t *testing.T) {
+	svc, ps, repoDir, id := newPushedProject(t, "**/*.md", ".todo/a.md", "notes.md")
+	storageDir := filepath.Join(svc.RepoPath(), "projects", id)
+
+	// Simulate a hand-edited manifest that drops the .todo pattern.
+	manifest := filepath.Join(repoDir, ".lnkinclude")
+	if err := os.WriteFile(manifest, []byte("notes.md\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := ps.ProjectSync(context.Background(), repoDir, false, false, false)
+	if err != nil {
+		t.Fatalf("ProjectSync: %v", err)
+	}
+	if len(result.Released) != 1 || result.Released[0] != ".todo/a.md" {
+		t.Errorf("released = %v, want [.todo/a.md]", result.Released)
+	}
+	if len(result.Synced) != 0 {
+		t.Errorf("synced = %v, want empty", result.Synced)
+	}
+	if len(result.Deletions) != 0 {
+		t.Errorf("deletions = %v, want empty", result.Deletions)
+	}
+
+	assertRealFile(t, filepath.Join(repoDir, ".todo", "a.md"), "content of .todo/a.md\n")
+	if testhelpers.FileExists(t, filepath.Join(storageDir, ".todo")) {
+		t.Error("expected .todo storage to be pruned")
+	}
+	// The still-matched file remains managed.
+	testhelpers.AssertSymlink(t, filepath.Join(repoDir, "notes.md"), filepath.Join(storageDir, "notes.md"))
+}
+
+func TestProjectSync_NewMatches(t *testing.T) {
+	svc, ps, repoDir, id := newPushedProject(t, ".todo/**", ".todo/a.md")
+
+	newFile := filepath.Join(repoDir, ".todo", "b.md")
+	testhelpers.MakeFile(t, newFile, "b\n")
+
+	result, err := ps.ProjectSync(context.Background(), repoDir, false, false, false)
+	if err != nil {
+		t.Fatalf("ProjectSync: %v", err)
+	}
+	if len(result.Synced) != 1 || result.Synced[0] != ".todo/b.md" {
+		t.Errorf("synced = %v, want [.todo/b.md]", result.Synced)
+	}
+	testhelpers.AssertSymlink(t, newFile, filepath.Join(svc.RepoPath(), "projects", id, ".todo", "b.md"))
+}
+
+func TestProjectSync_LiveDeletionsReportedThenPruned(t *testing.T) {
+	svc, ps, repoDir, id := newPushedProject(t, ".todo/**", ".todo/a.md", ".todo/b.md")
+	storageFile := filepath.Join(svc.RepoPath(), "projects", id, ".todo", "a.md")
+
+	// The user deletes the live symlink.
+	if err := os.Remove(filepath.Join(repoDir, ".todo", "a.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := ps.ProjectSync(context.Background(), repoDir, false, false, false)
+	if err != nil {
+		t.Fatalf("ProjectSync: %v", err)
+	}
+	if len(result.Deletions) != 1 || result.Deletions[0] != ".todo/a.md" {
+		t.Errorf("deletions = %v, want [.todo/a.md]", result.Deletions)
+	}
+	if len(result.Pruned) != 0 {
+		t.Errorf("pruned = %v, want empty without --prune-deletions", result.Pruned)
+	}
+	if !testhelpers.FileExists(t, storageFile) {
+		t.Error("expected storage copy to be kept")
+	}
+
+	pruned, err := ps.ProjectSync(context.Background(), repoDir, false, true, false)
+	if err != nil {
+		t.Fatalf("ProjectSync --prune-deletions: %v", err)
+	}
+	if len(pruned.Pruned) != 1 || pruned.Pruned[0] != ".todo/a.md" {
+		t.Errorf("pruned = %v, want [.todo/a.md]", pruned.Pruned)
+	}
+	if testhelpers.FileExists(t, storageFile) {
+		t.Error("expected storage copy to be pruned")
+	}
+}
+
+func TestProjectSync_DryRun(t *testing.T) {
+	svc, ps, repoDir, id := newPushedProject(t, ".todo/**", ".todo/a.md")
+	storageFile := filepath.Join(svc.RepoPath(), "projects", id, ".todo", "a.md")
+	liveFile := filepath.Join(repoDir, ".todo", "a.md")
+
+	manifest := filepath.Join(repoDir, ".lnkinclude")
+	if err := os.WriteFile(manifest, []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	before := len(testhelpers.GitLog(t, svc.RepoPath()))
+
+	result, err := ps.ProjectSync(context.Background(), repoDir, true, false, false)
+	if err != nil {
+		t.Fatalf("ProjectSync --dry-run: %v", err)
+	}
+	if len(result.Released) != 1 || result.Released[0] != ".todo/a.md" {
+		t.Errorf("released = %v, want [.todo/a.md]", result.Released)
+	}
+
+	testhelpers.AssertSymlink(t, liveFile, storageFile)
+	if !testhelpers.FileExists(t, storageFile) {
+		t.Error("expected storage copy untouched in dry-run")
+	}
+	if after := len(testhelpers.GitLog(t, svc.RepoPath())); after != before {
+		t.Errorf("expected no commit in dry-run, log grew from %d to %d", before, after)
+	}
+}
+
+func TestProjectSync_SkipsProjectGitTrackedUnlessForced(t *testing.T) {
+	svc, home := testhelpers.TestHome(t)
+	repoDir := filepath.Join(home, "repos", "hermes")
+	testhelpers.MakeDir(t, repoDir)
+	initProjectRepo(t, repoDir)
+
+	testhelpers.MakeFile(t, filepath.Join(repoDir, "tracked.md"), "tracked\n")
+	if out, err := exec.Command("git", "-C", repoDir, "add", "tracked.md").CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v\n%s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, ".lnkinclude"), []byte("*.md\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ps := service.NewProjectService(svc)
+	result, err := ps.ProjectSync(context.Background(), repoDir, false, false, false)
+	if err != nil {
+		t.Fatalf("ProjectSync: %v", err)
+	}
+	if len(result.Synced) != 0 {
+		t.Errorf("synced = %v, want empty", result.Synced)
+	}
+	// Both the fixture README.md and tracked.md are git-tracked.
+	if len(result.SkippedTracked) != 2 {
+		t.Errorf("skipped = %v, want 2 entries", result.SkippedTracked)
+	}
+
+	forced, err := ps.ProjectSync(context.Background(), repoDir, false, false, true)
+	if err != nil {
+		t.Fatalf("ProjectSync --force: %v", err)
+	}
+	if len(forced.Synced) != 2 {
+		t.Errorf("forced synced = %v, want 2 entries", forced.Synced)
+	}
+}
+
+func TestProjectRemove_RestoresFilesAndDropsStorage(t *testing.T) {
+	svc, ps, repoDir, id := newPushedProject(t, ".cursor/**", ".cursor/rules.md", ".cursor/extra.md")
+	storageDir := filepath.Join(svc.RepoPath(), "projects", id)
+
+	result, err := ps.ProjectRemove(context.Background(), repoDir)
+	if err != nil {
+		t.Fatalf("ProjectRemove: %v", err)
+	}
+	if len(result.Restored) != 2 {
+		t.Errorf("restored = %v, want 2 entries", result.Restored)
+	}
+
+	assertRealFile(t, filepath.Join(repoDir, ".cursor", "rules.md"), "content of .cursor/rules.md\n")
+	assertRealFile(t, filepath.Join(repoDir, ".cursor", "extra.md"), "content of .cursor/extra.md\n")
+	if testhelpers.FileExists(t, storageDir) {
+		t.Error("expected project storage to be deleted")
+	}
+
+	// .lnkinclude stays for later re-adoption.
+	if !testhelpers.FileExists(t, filepath.Join(repoDir, ".lnkinclude")) {
+		t.Error("expected .lnkinclude to be left in place")
+	}
+
+	logs := testhelpers.GitLog(t, svc.RepoPath())
+	found := false
+	for _, msg := range logs {
+		if strings.Contains(msg, "lnk: removed project") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected a removal commit, got %v", logs)
+	}
+}
+
+func TestProjectRemove_BacksUpConflictingLiveFile(t *testing.T) {
+	_, ps, repoDir, _ := newPushedProject(t, ".cursor/**", ".cursor/rules.md")
+
+	liveFile := filepath.Join(repoDir, ".cursor", "rules.md")
+	if err := os.Remove(liveFile); err != nil {
+		t.Fatal(err)
+	}
+	testhelpers.MakeFile(t, liveFile, "local edits\n")
+
+	result, err := ps.ProjectRemove(context.Background(), repoDir)
+	if err != nil {
+		t.Fatalf("ProjectRemove: %v", err)
+	}
+	if len(result.BackedUp) != 1 || result.BackedUp[0] != ".cursor/rules.md" {
+		t.Errorf("backed up = %v, want [.cursor/rules.md]", result.BackedUp)
+	}
+
+	assertRealFile(t, liveFile, "content of .cursor/rules.md\n")
+	data, err := os.ReadFile(liveFile + ".lnk-backup")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "local edits\n" {
+		t.Errorf("backup content = %q, want local edits", data)
+	}
+}
+
+func TestProjectRemove_ErrorsWhenNotManaged(t *testing.T) {
+	svc, home := testhelpers.TestHome(t)
+	repoDir := filepath.Join(home, "repos", "hermes")
+	testhelpers.MakeDir(t, repoDir)
+	initProjectRepo(t, repoDir)
+
+	ps := service.NewProjectService(svc)
+	_, err := ps.ProjectRemove(context.Background(), repoDir)
+	if !errors.Is(err, lnkerror.ErrNotManaged) {
+		t.Errorf("error = %v, want %v", err, lnkerror.ErrNotManaged)
+	}
+}
+
+func TestProjectForget_RemovesSymlinksKeepsStorage(t *testing.T) {
+	svc, ps, repoDir, id := newPushedProject(t, ".cursor/**", ".cursor/rules.md", ".cursor/extra.md")
+	storageFile := filepath.Join(svc.RepoPath(), "projects", id, ".cursor", "rules.md")
+
+	result, err := ps.ProjectForget(context.Background(), repoDir)
+	if err != nil {
+		t.Fatalf("ProjectForget: %v", err)
+	}
+	if len(result.Unlinked) != 2 {
+		t.Errorf("unlinked = %v, want 2 entries", result.Unlinked)
+	}
+
+	for _, rel := range []string{"rules.md", "extra.md"} {
+		if _, err := os.Lstat(filepath.Join(repoDir, ".cursor", rel)); err == nil {
+			t.Errorf("expected live path %s to be gone", rel)
+		}
+	}
+	if !testhelpers.FileExists(t, storageFile) {
+		t.Error("expected storage copy to be kept")
+	}
+
+	// The files can be brought back later.
+	info, err := ps.ProjectRestore(context.Background(), repoDir, false, false)
+	if err != nil {
+		t.Fatalf("ProjectRestore after forget: %v", err)
+	}
+	if len(info.Restored) != 2 {
+		t.Errorf("restored = %v, want 2 entries", info.Restored)
+	}
+	testhelpers.AssertSymlink(t, filepath.Join(repoDir, ".cursor", "rules.md"), storageFile)
+}
+
+func TestProjectForget_LeavesForeignSymlinks(t *testing.T) {
+	svc, ps, repoDir, id := newPushedProject(t, ".cursor/**", ".cursor/rules.md")
+	storageFile := filepath.Join(svc.RepoPath(), "projects", id, ".cursor", "rules.md")
+
+	liveFile := filepath.Join(repoDir, ".cursor", "rules.md")
+	if err := os.Remove(liveFile); err != nil {
+		t.Fatal(err)
+	}
+	foreign := filepath.Join(t.TempDir(), "elsewhere")
+	testhelpers.MakeFile(t, foreign, "not lnk\n")
+	if err := os.Symlink(foreign, liveFile); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := ps.ProjectForget(context.Background(), repoDir)
+	if err != nil {
+		t.Fatalf("ProjectForget: %v", err)
+	}
+	if len(result.Unlinked) != 0 {
+		t.Errorf("unlinked = %v, want empty for a foreign symlink", result.Unlinked)
+	}
+
+	target, err := os.Readlink(liveFile)
+	if err != nil {
+		t.Fatalf("expected foreign symlink to remain: %v", err)
+	}
+	if target != foreign {
+		t.Errorf("symlink target = %q, want %q", target, foreign)
+	}
+	if !testhelpers.FileExists(t, storageFile) {
+		t.Error("expected storage copy to be kept")
+	}
+}
+
+func TestProjectForget_ErrorsWhenNotManaged(t *testing.T) {
+	svc, home := testhelpers.TestHome(t)
+	repoDir := filepath.Join(home, "repos", "hermes")
+	testhelpers.MakeDir(t, repoDir)
+	initProjectRepo(t, repoDir)
+
+	ps := service.NewProjectService(svc)
+	_, err := ps.ProjectForget(context.Background(), repoDir)
+	if !errors.Is(err, lnkerror.ErrNotManaged) {
+		t.Errorf("error = %v, want %v", err, lnkerror.ErrNotManaged)
+	}
+}
+
+func TestProjectRestore_GatesOnPatterns(t *testing.T) {
+	svc, ps, repoDir, id := newPushedProject(t, "**/*.md", ".todo/a.md", "notes.md")
+	storageDir := filepath.Join(svc.RepoPath(), "projects", id)
+
+	// Hand-edit the manifest to drop the .todo pattern, leaving drift.
+	manifest := filepath.Join(repoDir, ".lnkinclude")
+	if err := os.WriteFile(manifest, []byte("notes.md\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	todoLive := filepath.Join(repoDir, ".todo", "a.md")
+	notesLive := filepath.Join(repoDir, "notes.md")
+	if err := os.Remove(todoLive); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(notesLive); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := ps.ProjectRestore(context.Background(), repoDir, false, false)
+	if err != nil {
+		t.Fatalf("ProjectRestore: %v", err)
+	}
+	if len(info.Restored) != 1 || info.Restored[0] != "notes.md" {
+		t.Errorf("restored = %v, want [notes.md]", info.Restored)
+	}
+	if len(info.SkippedUnmatched) != 1 || info.SkippedUnmatched[0] != ".todo/a.md" {
+		t.Errorf("skipped unmatched = %v, want [.todo/a.md]", info.SkippedUnmatched)
+	}
+
+	if _, err := os.Lstat(todoLive); err == nil {
+		t.Error("expected unmatched stored file to stay unrestored")
+	}
+	testhelpers.AssertSymlink(t, notesLive, filepath.Join(storageDir, "notes.md"))
 }
