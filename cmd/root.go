@@ -1144,6 +1144,24 @@ func printDoctor(w io.Writer, report service.DoctorReport) error {
 			}
 		}
 	}
+	if len(report.ProjectIssues) > 0 {
+		if _, err := fmt.Fprintln(w, "Project issues:"); err != nil {
+			return err
+		}
+		for _, issue := range report.ProjectIssues {
+			if _, err := fmt.Fprintf(w, "  [%s] %s: %s", issue.Severity, issue.ProjectID, issue.Issue); err != nil {
+				return err
+			}
+			if issue.Suggestion != "" {
+				if _, err := fmt.Fprintf(w, " -> %s", issue.Suggestion); err != nil {
+					return err
+				}
+			}
+			if _, err := fmt.Fprintln(w); err != nil {
+				return err
+			}
+		}
+	}
 	if len(report.PrunedProjects) > 0 {
 		if _, err := fmt.Fprintln(w, "Pruned empty project storage:"); err != nil {
 			return err
