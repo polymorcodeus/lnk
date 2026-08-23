@@ -1459,3 +1459,219 @@ func TestProjectRestore_GatesOnPatterns(t *testing.T) {
 	}
 	testhelpers.AssertSymlink(t, notesLive, filepath.Join(storageDir, "notes.md"))
 }
+
+// ---------- Global patterns, discovery, and doctor ----------
+
+func TestProjectAddGlobalPattern(t *testing.T) {
+	svc, home := testhelpers.TestHome(t)
+	repoDir := filepath.Join(home, "repos", "hermes")
+	testhelpers.MakeDir(t, repoDir)
+	initProjectRepo(t, repoDir)
+
+	ps := service.NewProjectService(svc)
+
+	pattern, err := ps.ProjectAddGlobalPattern("AGENTS.md")
+	if err != nil {
+		t.Fatalf("ProjectAddGlobalPattern: %v", err)
+	}
+	if pattern != "AGENTS.md" {
+		t.Errorf("pattern = %q, want AGENTS.md", pattern)
+	}
+
+	globalPath := filepath.Join(svc.RepoPath(), ".lnkinclude")
+	data, err := os.ReadFile(globalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "AGENTS.md\n" {
+		t.Errorf("global .lnkinclude = %q", data)
+	}
+
+	// Duplicate.
+	if _, err := ps.ProjectAddGlobalPattern("AGENTS.md"); !errors.Is(err, lnkerror.ErrAlreadyManaged) {
+		t.Errorf("duplicate error = %v, want %v", err, lnkerror.ErrAlreadyManaged)
+	}
+
+	// Empty.
+	if _, err := ps.ProjectAddGlobalPattern("  "); !errors.Is(err, lnkerror.ErrEmptyPattern) {
+		t.Errorf("empty error = %v, want %v", err, lnkerror.ErrEmptyPattern)
+	}
+}
+
+func TestProjectUntrackGlobalPattern(t *testing.T) {
+	svc, home := testhelpers.TestHome(t)
+	repoDir := filepath.Join(home, "repos", "hermes")
+	testhelpers.MakeDir(t, repoDir)
+	initProjectRepo(t, repoDir)
+
+	ps := service.NewProjectService(svc)
+	if _, err := ps.ProjectAddGlobalPattern("AGENTS.md"); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+
+	removed, err := ps.ProjectUntrackGlobalPattern("AGENTS.md")
+	if err != nil {
+		t.Fatalf("ProjectUntrackGlobalPattern: %v", err)
+	}
+	if !removed {
+		t.Error("expected removed=true")
+	}
+
+	globalPath := filepath.Join(svc.RepoPath(), ".lnkinclude")
+	data, err := os.ReadFile(globalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(data)) != "" {
+		t.Errorf("global .lnkinclude = %q, want empty", data)
+	}
+
+	if _, err := ps.ProjectUntrackGlobalPattern("nope.md"); !errors.Is(err, lnkerror.ErrNotManaged) {
+		t.Errorf("missing error = %v, want %v", err, lnkerror.ErrNotManaged)
+	}
+}
+
+func TestProjectListProjects(t *testing.T) {
+	svc, home := testhelpers.TestHome(t)
+
+	// First project, two files.
+	dir1 := filepath.Join(home, "repos", "alpha")
+	testhelpers.MakeDir(t, dir1)
+	initProjectRepo(t, dir1)
+	ps1 := service.NewProjectService(svc)
+	if _, _, err := ps1.ProjectAddPattern(context.Background(), dir1, ".todo/**"); err != nil {
+		t.Fatalf("add pattern: %v", err)
+	}
+	testhelpers.MakeFile(t, filepath.Join(dir1, ".todo", "a.md"), "a\n")
+	testhelpers.MakeFile(t, filepath.Join(dir1, ".todo", "b.md"), "b\n")
+	if _, err := ps1.ProjectPush(context.Background(), dir1, false); err != nil {
+		t.Fatalf("ProjectPush: %v", err)
+	}
+
+	// Second project with a different origin, one file.
+	dir2 := filepath.Join(home, "repos", "beta")
+	testhelpers.MakeDir(t, dir2)
+	testhelpers.InitGitRepo(t, dir2)
+	if out, err := exec.Command("git", "-C", dir2, "remote", "add", "origin", "git@github.com:User/Other.git").CombinedOutput(); err != nil {
+		t.Fatalf("git remote add: %v\n%s", err, out)
+	}
+	ps2 := service.NewProjectService(svc)
+	if _, _, err := ps2.ProjectAddPattern(context.Background(), dir2, "notes.md"); err != nil {
+		t.Fatalf("add pattern: %v", err)
+	}
+	testhelpers.MakeFile(t, filepath.Join(dir2, "notes.md"), "notes\n")
+	if _, err := ps2.ProjectPush(context.Background(), dir2, false); err != nil {
+		t.Fatalf("ProjectPush: %v", err)
+	}
+
+	projects, err := ps1.ProjectListProjects()
+	if err != nil {
+		t.Fatalf("ProjectListProjects: %v", err)
+	}
+	if len(projects) != 2 {
+		t.Fatalf("projects = %v, want 2", projects)
+	}
+
+	byID := map[string]int{}
+	for _, p := range projects {
+		byID[p.ID] = p.Files
+	}
+	if byID["github.com/user/repo"] != 2 {
+		t.Errorf("github.com/user/repo files = %d, want 2", byID["github.com/user/repo"])
+	}
+	if byID["github.com/user/other"] != 1 {
+		t.Errorf("github.com/user/other files = %d, want 1", byID["github.com/user/other"])
+	}
+
+	// Sorted by ID.
+	if projects[0].ID > projects[1].ID {
+		t.Errorf("projects not sorted: %v", projects)
+	}
+}
+
+func TestProjectMarkerNotRestored(t *testing.T) {
+	svc, ps, repoDir, _ := newPushedProject(t, ".cursor/**", ".cursor/rules.md")
+
+	if err := os.Remove(filepath.Join(repoDir, ".cursor", "rules.md")); err != nil {
+		t.Fatal(err)
+	}
+	info, err := ps.ProjectRestore(context.Background(), repoDir, false, false)
+	if err != nil {
+		t.Fatalf("ProjectRestore: %v", err)
+	}
+	if len(info.Restored) != 1 || info.Restored[0] != ".cursor/rules.md" {
+		t.Errorf("restored = %v, want [.cursor/rules.md]", info.Restored)
+	}
+	if testhelpers.FileExists(t, filepath.Join(repoDir, ".lnkproject")) {
+		t.Error("expected .lnkproject marker not to be restored into the project")
+	}
+	if !testhelpers.FileExists(t, filepath.Join(svc.RepoPath(), "projects", "github.com", "user", "repo", ".lnkproject")) {
+		t.Error("expected .lnkproject marker in storage")
+	}
+}
+
+func TestDoctor_ReportsStoredProjects(t *testing.T) {
+	svc, _, _, _ := newPushedProject(t, ".todo/**", ".todo/a.md", ".todo/b.md")
+
+	report, err := svc.Doctor(context.Background(), "", true, false, false)
+	if err != nil {
+		t.Fatalf("Doctor: %v", err)
+	}
+	if len(report.Projects) != 1 {
+		t.Fatalf("projects = %v, want 1", report.Projects)
+	}
+	if report.Projects[0].ID != "github.com/user/repo" || report.Projects[0].Files != 2 {
+		t.Errorf("project = %+v, want github.com/user/repo with 2 files", report.Projects[0])
+	}
+	if len(report.UnmarkedProjects) != 0 || len(report.EmptyProjects) != 0 {
+		t.Errorf("unmarked = %v, empty = %v, want none", report.UnmarkedProjects, report.EmptyProjects)
+	}
+}
+
+func TestDoctor_FlagsUnmarkedAndEmptyProjects(t *testing.T) {
+	svc, _ := testhelpers.TestHome(t)
+	projectsRoot := filepath.Join(svc.RepoPath(), "projects")
+
+	// Unmarked: files under projects/ with no marker anywhere.
+	unmarkedDir := filepath.Join(projectsRoot, "legacy")
+	testhelpers.MakeFile(t, filepath.Join(unmarkedDir, "x.md"), "x\n")
+
+	// Empty: a marker but no stored files.
+	emptyDir := filepath.Join(projectsRoot, "emptied")
+	testhelpers.MakeDir(t, emptyDir)
+	if err := os.WriteFile(filepath.Join(emptyDir, ".lnkproject"), []byte("emptied\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := svc.Doctor(context.Background(), "", true, false, false)
+	if err != nil {
+		t.Fatalf("Doctor: %v", err)
+	}
+	if len(report.UnmarkedProjects) != 1 || report.UnmarkedProjects[0] != "legacy" {
+		t.Errorf("unmarked = %v, want [legacy]", report.UnmarkedProjects)
+	}
+	if len(report.EmptyProjects) != 1 || report.EmptyProjects[0] != "emptied" {
+		t.Errorf("empty = %v, want [emptied]", report.EmptyProjects)
+	}
+}
+
+func TestDoctor_PrunesEmptyProjects(t *testing.T) {
+	svc, _ := testhelpers.TestHome(t)
+	emptyDir := filepath.Join(svc.RepoPath(), "projects", "emptied")
+	testhelpers.MakeDir(t, emptyDir)
+	if err := os.WriteFile(filepath.Join(emptyDir, ".lnkproject"), []byte("emptied\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	testhelpers.CommitFile(t, svc.RepoPath(), "projects/emptied/.lnkproject")
+
+	report, err := svc.Doctor(context.Background(), "", true, true, true)
+	if err != nil {
+		t.Fatalf("Doctor: %v", err)
+	}
+	if len(report.PrunedProjects) != 1 || report.PrunedProjects[0] != "emptied" {
+		t.Errorf("pruned = %v, want [emptied]", report.PrunedProjects)
+	}
+	if testhelpers.FileExists(t, emptyDir) {
+		t.Error("expected empty project storage to be removed")
+	}
+}

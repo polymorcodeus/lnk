@@ -187,7 +187,7 @@ lnk bootstrap                             # run manually
 
 Track project-local configuration files without committing them to the project's own git repository. Useful for `.crush/crush.json`, `.vscode/settings.json`, repo-specific shell aliases, or any file you want backed up in your dotfiles repo but not pushed upstream.
 
-Project scope uses a `.lnkinclude` file inside the project root. Patterns follow `.gitignore` syntax, but a match means "include". Global patterns can live in your lnk repo root; local patterns are project-specific.
+Project scope uses a `.lnkinclude` file inside the project root. Patterns follow `.gitignore` syntax, but a match means "include". Global patterns live in your lnk repo root (`.config/lnk/.lnkinclude`) and apply to every project; local patterns are project-specific and are evaluated after the global ones, so they can negate a global include with `!`.
 
 ```bash
 # inside a git repository
@@ -195,8 +195,10 @@ lnk project init                          # create an empty .lnkinclude
 lnk project add .crush/**                 # track all files under .crush/
 lnk project add .vscode/settings.json     # track a single file
 lnk project list                          # show effective global + local patterns
+lnk project list --all                    # list stored projects and file counts
 lnk project push                          # move matches to lnk storage and symlink back
 lnk project sync                          # reconcile patterns, live files, and storage
+lnk project sync --prune-deletions        # also drop storage for files deleted locally
 lnk project restore                       # recreate symlinks from storage
 lnk project restore --dry-run             # preview what would be restored
 lnk project pull                          # pull lnk repo and restore
@@ -204,9 +206,22 @@ lnk project untrack .crush/**             # remove a local pattern and restore i
 lnk project untrack --keep .crush/**      # remove a pattern but leave files managed
 lnk project remove                        # stop managing the project, restore all files
 lnk project forget                        # stop managing the project, keep stored files
+
+# global patterns (apply to every project)
+lnk project add --global AGENTS.md        # include AGENTS.md everywhere
+lnk project add '!AGENTS.md'              # then exclude it in one project
+lnk project untrack --global AGENTS.md    # remove the global pattern
 ```
 
 Matched files are stored under `projects/<normalized-origin>/<path>/` in your lnk repo (derived from the project's origin remote) and symlinked back into the project. Existing files at symlink locations are backed up to `<path>.lnk-backup` during restore, just like host/common scope restores.
+
+### Notes and edge cases
+
+- **Global patterns are hand-managed** (or edited via `--global`): they apply to every project, so negate them per project with a local `!` pattern. Quote the `!` in your shell (`'!AGENTS.md'`) or zsh's history expansion will eat it before lnk sees it.
+- **Files are tracked individually**, not as directory symlinks. A `.todo/` pattern matches every file under it, so new files are picked up by the next `project push`/`project sync`. This differs from `lnk add`, which symlinks a whole directory as one unit.
+- **Files tracked by the project's own git are left alone.** If a match is committed upstream (a typical `AGENTS.md`), push/sync skip it with a warning to avoid replacing a committed file with a machine-local symlink; use `--force` to override.
+- **The lnk repo protects itself.** Project commands refuse to run inside the lnk repository (or any clone of it) to prevent storing it inside its own storage.
+- **Reconciliation is explicit for deletions.** `project sync` reports stored files whose live copies were deleted; they are only removed from storage with `--prune-deletions`.
 
 ## Man pages
 

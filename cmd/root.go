@@ -231,17 +231,33 @@ func newProjectInitCmd(repoFlag *string) *cobra.Command {
 
 // newProjectAddCmd returns the "project add" subcommand.
 func newProjectAddCmd(repoFlag *string) *cobra.Command {
+	var global bool
+
 	cmd := &cobra.Command{
-		Use:   "add <pattern...>",
-		Short: "Add a pattern to .lnkinclude for the current project",
+		Use:   "add [--global] <pattern...>",
+		Short: "Add a pattern to .lnkinclude (local unless --global)",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ps := service.NewProjectService(svc(repoFlag))
+
+			if global {
+				for _, pattern := range args {
+					normalized, err := ps.ProjectAddGlobalPattern(pattern)
+					if err != nil {
+						return err
+					}
+					if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Added '%s' to the global .lnkinclude — remember to commit it.\n", normalized); err != nil {
+						return err
+					}
+				}
+				return nil
+			}
+
 			projectRoot, err := projectDir(cmd)
 			if err != nil {
 				return err
 			}
 
-			ps := service.NewProjectService(svc(repoFlag))
 			for _, pattern := range args {
 				normalized, matched, err := ps.ProjectAddPattern(cmd.Context(), projectRoot, pattern)
 				if err != nil {
@@ -259,21 +275,43 @@ func newProjectAddCmd(repoFlag *string) *cobra.Command {
 			return nil
 		},
 	}
+
+	cmd.Flags().BoolVar(&global, "global", false, "add the pattern to the lnk repo's global .lnkinclude")
 	return cmd
 }
 
 // newProjectListCmd returns the "project list" subcommand.
 func newProjectListCmd(repoFlag *string) *cobra.Command {
+	var all bool
+
 	cmd := &cobra.Command{
-		Use:   "list",
-		Short: "List effective patterns for the current project",
+		Use:   "list [--all]",
+		Short: "List effective patterns, or all stored projects with --all",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ps := service.NewProjectService(svc(repoFlag))
+
+			if all {
+				projects, err := ps.ProjectListProjects()
+				if err != nil {
+					return err
+				}
+				if len(projects) == 0 {
+					_, err = fmt.Fprintln(cmd.OutOrStdout(), "No stored projects")
+					return err
+				}
+				for _, p := range projects {
+					if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s (%d file(s))\n", p.ID, p.Files); err != nil {
+						return err
+					}
+				}
+				return nil
+			}
+
 			projectRoot, err := projectDir(cmd)
 			if err != nil {
 				return err
 			}
 
-			ps := service.NewProjectService(svc(repoFlag))
 			global, local, err := ps.ProjectListPatterns(cmd.Context(), projectRoot)
 			if err != nil {
 				return err
@@ -314,24 +352,36 @@ func newProjectListCmd(repoFlag *string) *cobra.Command {
 			return err
 		},
 	}
+
+	cmd.Flags().BoolVar(&all, "all", false, "list stored projects instead of patterns")
 	return cmd
 }
 
 // newProjectUntrackCmd returns the "project untrack" subcommand.
 func newProjectUntrackCmd(repoFlag *string) *cobra.Command {
 	var keep bool
+	var global bool
 
 	cmd := &cobra.Command{
-		Use:   "untrack [--keep] <pattern>",
+		Use:   "untrack [--keep] [--global] <pattern>",
 		Short: "Remove a pattern from .lnkinclude and unmanage its files",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ps := service.NewProjectService(svc(repoFlag))
+
+			if global {
+				if _, err := ps.ProjectUntrackGlobalPattern(args[0]); err != nil {
+					return err
+				}
+				_, err := fmt.Fprintf(cmd.OutOrStdout(), "Removed '%s' from the global .lnkinclude — remember to commit it.\n", args[0])
+				return err
+			}
+
 			projectRoot, err := projectDir(cmd)
 			if err != nil {
 				return err
 			}
 
-			ps := service.NewProjectService(svc(repoFlag))
 			result, err := ps.ProjectUntrackPattern(cmd.Context(), projectRoot, args[0], keep)
 			if err != nil {
 				return err
@@ -340,7 +390,7 @@ func newProjectUntrackCmd(repoFlag *string) *cobra.Command {
 			if result.IsGlobal {
 				app := svc(repoFlag)
 				globalPath := filepath.Join(app.RepoPath(), ".lnkinclude")
-				_, err = fmt.Fprintf(cmd.ErrOrStderr(), "This pattern comes from the global .lnkinclude — edit %s to remove it.\n", globalPath)
+				_, err = fmt.Fprintf(cmd.ErrOrStderr(), "This pattern comes from the global .lnkinclude — edit %s to remove it, or use --global.\n", globalPath)
 				return err
 			}
 
@@ -367,6 +417,7 @@ func newProjectUntrackCmd(repoFlag *string) *cobra.Command {
 	}
 
 	cmd.Flags().BoolVar(&keep, "keep", false, "only edit .lnkinclude, leaving managed files in place")
+	cmd.Flags().BoolVar(&global, "global", false, "remove the pattern from the lnk repo's global .lnkinclude")
 	return cmd
 }
 
@@ -923,7 +974,7 @@ func newDoctorCmd(repoFlag *string) *cobra.Command {
 	cmd.Flags().StringVar(&host, "host", "", "check one host profile")
 	cmd.Flags().BoolVar(&all, "all", false, "check all storage scopes")
 	cmd.Flags().BoolVar(&fix, "fix", false, "apply safe automatic fixes")
-	cmd.Flags().BoolVar(&pruneEmpty, "prune-empty", false, "remove empty host scopes and their storage directories when passed with --fix")
+	cmd.Flags().BoolVar(&pruneEmpty, "prune-empty", false, "remove empty host scopes and project storage when passed with --fix")
 	cmd.MarkFlagsMutuallyExclusive("all", "host")
 	return cmd
 }
@@ -1058,6 +1109,46 @@ func printDoctor(w io.Writer, report service.DoctorReport) error {
 	for _, result := range report.ScopeResults {
 		if err := result.Print(w); err != nil {
 			return err
+		}
+	}
+	if len(report.Projects) > 0 {
+		if _, err := fmt.Fprintln(w, "Projects:"); err != nil {
+			return err
+		}
+		for _, p := range report.Projects {
+			if _, err := fmt.Fprintf(w, "  %s (%d file(s))\n", p.ID, p.Files); err != nil {
+				return err
+			}
+		}
+	}
+	if len(report.UnmarkedProjects) > 0 {
+		if _, err := fmt.Fprintln(w, "Stored projects without a marker:"); err != nil {
+			return err
+		}
+		for _, p := range report.UnmarkedProjects {
+			if _, err := fmt.Fprintf(w, "  %s\n", p); err != nil {
+				return err
+			}
+		}
+	}
+	if len(report.EmptyProjects) > 0 {
+		if _, err := fmt.Fprintln(w, "Empty project storage:"); err != nil {
+			return err
+		}
+		for _, p := range report.EmptyProjects {
+			if _, err := fmt.Fprintf(w, "  %s\n", p); err != nil {
+				return err
+			}
+		}
+	}
+	if len(report.PrunedProjects) > 0 {
+		if _, err := fmt.Fprintln(w, "Pruned empty project storage:"); err != nil {
+			return err
+		}
+		for _, p := range report.PrunedProjects {
+			if _, err := fmt.Fprintf(w, "  %s\n", p); err != nil {
+				return err
+			}
 		}
 	}
 	if len(report.EmptyScopes) > 0 {

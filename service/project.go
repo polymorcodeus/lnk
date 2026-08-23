@@ -30,6 +30,10 @@ func NewProjectService(svc *Service) *ProjectService {
 	return &ProjectService{svc: svc}
 }
 
+// projectMarkerFile marks the storage root of one project, so that project
+// directories can be enumerated even though a project ID contains slashes.
+const projectMarkerFile = ".lnkproject"
+
 // ProjectInit activates project scope for the git repo containing
 // projectRoot by creating an empty .lnkinclude file at the repo root if one
 // does not already exist. It returns true when the file was created and
@@ -496,6 +500,9 @@ func (ps *ProjectService) ProjectPush(ctx context.Context, projectRoot string, f
 	if err := os.MkdirAll(storageDir, 0o755); err != nil {
 		return ProjectPushResult{}, fmt.Errorf("create project storage: %w", err)
 	}
+	if err := ensureProjectMarker(storageDir, id); err != nil {
+		return ProjectPushResult{}, err
+	}
 
 	global, err := patterns.Load(filepath.Join(ps.svc.RepoPath(), ".lnkinclude"))
 	if err != nil {
@@ -688,6 +695,9 @@ func (ps *ProjectService) releaseUnmatched(ctx context.Context, root string, eff
 			return err
 		}
 		rel = filepath.ToSlash(rel)
+		if rel == projectMarkerFile {
+			return nil
+		}
 
 		match, err := patterns.Match(effective, rel)
 		if err != nil {
@@ -754,6 +764,9 @@ func (ps *ProjectService) liveDeletions(ctx context.Context, root string, effect
 			return err
 		}
 		rel = filepath.ToSlash(rel)
+		if rel == projectMarkerFile {
+			return nil
+		}
 
 		match, err := patterns.Match(effective, rel)
 		if err != nil {
@@ -831,6 +844,9 @@ func (ps *ProjectService) ProjectSync(ctx context.Context, projectRoot string, d
 	if !dryRun {
 		if err := os.MkdirAll(storageDir, 0o755); err != nil {
 			return ProjectSyncResult{}, fmt.Errorf("create project storage: %w", err)
+		}
+		if err := ensureProjectMarker(storageDir, id); err != nil {
+			return ProjectSyncResult{}, err
 		}
 	}
 
@@ -931,6 +947,9 @@ func (ps *ProjectService) ProjectRemove(ctx context.Context, projectRoot string)
 			return err
 		}
 		rel = filepath.ToSlash(rel)
+		if rel == projectMarkerFile {
+			return nil
+		}
 
 		backed, err := releaseFile(fs, path, filepath.Join(root, filepath.FromSlash(rel)), storageDir)
 		if err != nil {
@@ -1014,8 +1033,12 @@ func (ps *ProjectService) ProjectForget(ctx context.Context, projectRoot string)
 		if err != nil {
 			return err
 		}
+		rel = filepath.ToSlash(rel)
+		if rel == projectMarkerFile {
+			return nil
+		}
 
-		livePath := filepath.Join(root, filepath.FromSlash(filepath.ToSlash(rel)))
+		livePath := filepath.Join(root, filepath.FromSlash(rel))
 		liveInfo, statErr := os.Lstat(livePath)
 		if statErr != nil || liveInfo.Mode()&os.ModeSymlink == 0 {
 			return nil
@@ -1034,6 +1057,253 @@ func (ps *ProjectService) ProjectForget(ctx context.Context, projectRoot string)
 	}
 
 	return result, nil
+}
+
+// ensureProjectMarker writes the .lnkproject marker into a project's storage
+// root, recording its ID so stored projects can be enumerated even though
+// IDs contain slashes.
+func ensureProjectMarker(storageDir, id string) error {
+	marker := filepath.Join(storageDir, projectMarkerFile)
+	if _, err := os.Stat(marker); err == nil {
+		return nil
+	}
+	if err := os.WriteFile(marker, []byte(id+"\n"), 0o644); err != nil {
+		return fmt.Errorf("write project marker: %w", err)
+	}
+	return nil
+}
+
+// ProjectAddGlobalPattern appends a pattern to the lnk repo's global
+// .lnkinclude. Global patterns are stored verbatim (they apply to every
+// project, so they cannot be relativized against one root) and are not
+// match-checked.
+func (ps *ProjectService) ProjectAddGlobalPattern(rawPattern string) (string, error) {
+	pattern := strings.TrimSpace(rawPattern)
+	if pattern == "" || strings.TrimPrefix(pattern, "!") == "" {
+		return "", lnkerror.Wrap(lnkerror.ErrEmptyPattern)
+	}
+
+	manifest := filepath.Join(ps.svc.RepoPath(), ".lnkinclude")
+	existing, err := patterns.Load(manifest)
+	if err != nil {
+		return "", fmt.Errorf("load global .lnkinclude: %w", err)
+	}
+	if slices.Contains(existing, pattern) {
+		return "", lnkerror.WithPath(lnkerror.ErrAlreadyManaged, pattern)
+	}
+
+	if err := appendPattern(manifest, pattern); err != nil {
+		return "", err
+	}
+	return pattern, nil
+}
+
+// ProjectUntrackGlobalPattern removes a pattern from the lnk repo's global
+// .lnkinclude. It returns removed=true when the pattern was present.
+func (ps *ProjectService) ProjectUntrackGlobalPattern(pattern string) (bool, error) {
+	manifest := filepath.Join(ps.svc.RepoPath(), ".lnkinclude")
+	lines, err := patterns.Load(manifest)
+	if err != nil {
+		return false, fmt.Errorf("load global .lnkinclude: %w", err)
+	}
+	if !slices.Contains(lines, pattern) {
+		return false, lnkerror.WithPath(lnkerror.ErrNotManaged, pattern)
+	}
+	if err := rewritePatterns(manifest, lines, pattern); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// StoredProject describes one project discovered in lnk storage.
+type StoredProject struct {
+	ID    string
+	Files int
+}
+
+// ProjectListProjects returns the projects discovered in lnk storage via
+// their .lnkproject markers, sorted by ID.
+func (ps *ProjectService) ProjectListProjects() ([]StoredProject, error) {
+	root := filepath.Join(ps.svc.RepoPath(), "projects")
+	if _, err := os.Stat(root); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("scan projects: %w", err)
+	}
+
+	var result []StoredProject
+	err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if info.IsDir() || info.Name() != projectMarkerFile {
+			return nil
+		}
+		id, err := filepath.Rel(root, filepath.Dir(path))
+		if err != nil {
+			return err
+		}
+		id = filepath.ToSlash(id)
+		files, err := countProjectFiles(filepath.Dir(path))
+		if err != nil {
+			return err
+		}
+		result = append(result, StoredProject{ID: id, Files: files})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	slices.SortFunc(result, func(a, b StoredProject) int {
+		return strings.Compare(a.ID, b.ID)
+	})
+	return result, nil
+}
+
+// ProjectHealth captures the storage-side health of one project for doctor.
+type ProjectHealth struct {
+	ID    string
+	Files int
+}
+
+// scanProjects returns the stored projects, top-level storage entries
+// without a marker, and marked projects with no files.
+func (s *Service) scanProjects() (projects []ProjectHealth, unmarked, empty []string, err error) {
+	root := filepath.Join(s.repoPath, "projects")
+	if _, err := os.Stat(root); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil, nil, nil
+		}
+		return nil, nil, nil, fmt.Errorf("scan projects: %w", err)
+	}
+
+	markerDirs := make(map[string]struct{})
+	err = filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if info.IsDir() || info.Name() != projectMarkerFile {
+			return nil
+		}
+		markerDirs[filepath.Dir(path)] = struct{}{}
+		return nil
+	})
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	for dir := range markerDirs {
+		id, err := filepath.Rel(root, dir)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		id = filepath.ToSlash(id)
+		files, err := countProjectFiles(dir)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if files == 0 {
+			empty = append(empty, id)
+		} else {
+			projects = append(projects, ProjectHealth{ID: id, Files: files})
+		}
+	}
+	slices.SortFunc(projects, func(a, b ProjectHealth) int {
+		return strings.Compare(a.ID, b.ID)
+	})
+	slices.Sort(empty)
+
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if !e.IsDir() {
+			unmarked = append(unmarked, name)
+			continue
+		}
+		hasMarker, err := dirContainsMarker(filepath.Join(root, name))
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if hasMarker {
+			continue
+		}
+		hasFiles, err := dirContainsFiles(filepath.Join(root, name))
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if hasFiles {
+			unmarked = append(unmarked, name)
+		}
+	}
+	slices.Sort(unmarked)
+
+	return projects, unmarked, empty, nil
+}
+
+// countProjectFiles counts regular files under dir, excluding the project
+// marker itself.
+func countProjectFiles(dir string) (int, error) {
+	n := 0
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if info.IsDir() || info.Name() == projectMarkerFile {
+			return nil
+		}
+		n++
+		return nil
+	})
+	return n, err
+}
+
+func dirContainsMarker(dir string) (bool, error) {
+	found := false
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if !info.IsDir() && info.Name() == projectMarkerFile {
+			found = true
+		}
+		return nil
+	})
+	return found, err
+}
+
+func dirContainsFiles(dir string) (bool, error) {
+	found := false
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if !info.IsDir() {
+			found = true
+		}
+		return nil
+	})
+	return found, err
+}
+
+// pruneEmptyProjects removes the storage directory of each empty project and
+// returns the pruned IDs and the marker paths to stage for removal.
+func (s *Service) pruneEmptyProjects(ids []string) ([]string, []string, error) {
+	var pruned []string
+	var stagePaths []string
+	for _, id := range ids {
+		dir := filepath.Join(s.repoPath, "projects", filepath.FromSlash(id))
+		if err := os.RemoveAll(dir); err != nil {
+			return nil, nil, fmt.Errorf("remove empty project storage %s: %w", id, err)
+		}
+		stagePaths = append(stagePaths, filepath.ToSlash(filepath.Join("projects", id, projectMarkerFile)))
+		pruned = append(pruned, id)
+	}
+	return pruned, stagePaths, nil
 }
 
 // ProjectRestore recreates symlinks for all project-scoped files from
@@ -1088,6 +1358,9 @@ func (ps *ProjectService) ProjectRestore(ctx context.Context, projectRoot string
 			return err
 		}
 		rel = filepath.ToSlash(rel)
+		if rel == projectMarkerFile {
+			return nil
+		}
 
 		// Stored files whose patterns no longer match are drift, not state to
 		// recreate; 'lnk project sync' moves them back.

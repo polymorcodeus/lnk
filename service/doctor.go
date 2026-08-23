@@ -57,11 +57,18 @@ type DoctorReport struct {
 	BrokenSymlinkFix        bool
 	EmptyScopes             []string // host scopes with no tracked items (scan mode)
 	PrunedScopes            []string // host scopes removed by --prune-empty --fix
+	Projects                []ProjectHealth
+	UnmarkedProjects        []string // storage under projects/ without a marker
+	EmptyProjects           []string // marked projects with no stored files
+	PrunedProjects          []string // empty project storage removed by --fix --prune-empty
 }
 
 // HasIssues reports whether the doctor found actionable issues.
 func (r DoctorReport) HasIssues() bool {
 	if r.MarkerMissing || len(r.Collisions) > 0 || len(r.EmptyScopes) > 0 {
+		return true
+	}
+	if len(r.UnmarkedProjects) > 0 || len(r.EmptyProjects) > 0 {
 		return true
 	}
 	for _, result := range r.ScopeResults {
@@ -167,6 +174,14 @@ func (s *Service) doctorScan(ctx context.Context, host string, all bool) (Doctor
 	}
 	report.EmptyScopes = empty
 
+	projects, unmarked, emptyProjects, err := s.scanProjects()
+	if err != nil {
+		return DoctorReport{}, err
+	}
+	report.Projects = projects
+	report.UnmarkedProjects = unmarked
+	report.EmptyProjects = emptyProjects
+
 	return report, nil
 }
 
@@ -230,6 +245,15 @@ func (s *Service) doctorFix(ctx context.Context, host string, all, pruneEmpty bo
 			return DoctorReport{}, err
 		}
 		report.PrunedScopes = pruned
+		stagePaths = append(stagePaths, paths...)
+	}
+
+	if pruneEmpty && len(report.EmptyProjects) > 0 {
+		pruned, paths, err := s.pruneEmptyProjects(report.EmptyProjects)
+		if err != nil {
+			return DoctorReport{}, err
+		}
+		report.PrunedProjects = pruned
 		stagePaths = append(stagePaths, paths...)
 	}
 
