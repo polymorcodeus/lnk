@@ -37,6 +37,7 @@ func NewRootCommand() *cobra.Command {
 	}
 
 	rootCmd.PersistentFlags().StringVar(&repoPath, "repo", "", "path to the lnk repository")
+	rootCmd.PersistentFlags().Bool("no-project", false, "skip automatic project scope detection")
 
 	rootCmd.AddCommand(newInitCmd(&repoPath))
 	rootCmd.AddCommand(newCloneCmd(&repoPath))
@@ -913,7 +914,8 @@ func newRestoreCmd(repoFlag *string) *cobra.Command {
 		Short: "Restore the effective machine profile",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := svc(repoFlag)
-			info, err := app.Restore(cmd.Context(), host, dryRun)
+			noProject, _ := cmd.Flags().GetBool("no-project")
+			info, err := app.RestoreWithProject(cmd.Context(), host, noProject, dryRun)
 			if err != nil {
 				return err
 			}
@@ -935,7 +937,8 @@ func newUpdateCmd(repoFlag *string) *cobra.Command {
 		Short: "Pull repo changes and restore the effective machine profile",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := svc(repoFlag)
-			info, err := app.Update(cmd.Context(), host)
+			noProject, _ := cmd.Flags().GetBool("no-project")
+			info, err := app.UpdateWithProject(cmd.Context(), host, noProject)
 			if err != nil {
 				return err
 			}
@@ -1137,6 +1140,24 @@ func printDoctor(w io.Writer, report service.DoctorReport) error {
 		}
 		for _, p := range report.EmptyProjects {
 			if _, err := fmt.Fprintf(w, "  %s\n", p); err != nil {
+				return err
+			}
+		}
+	}
+	if len(report.ProjectIssues) > 0 {
+		if _, err := fmt.Fprintln(w, "Project issues:"); err != nil {
+			return err
+		}
+		for _, issue := range report.ProjectIssues {
+			if _, err := fmt.Fprintf(w, "  [%s] %s: %s", issue.Severity, issue.ProjectID, issue.Issue); err != nil {
+				return err
+			}
+			if issue.Suggestion != "" {
+				if _, err := fmt.Fprintf(w, " -> %s", issue.Suggestion); err != nil {
+					return err
+				}
+			}
+			if _, err := fmt.Fprintln(w); err != nil {
 				return err
 			}
 		}

@@ -157,9 +157,11 @@ lnk list --all                            # all scopes
 ```bash
 lnk doctor                                # audit repo and profile health
 lnk doctor --fix                          # apply safe automatic fixes
-lnk doctor --fix --prune-empty            # also remove empty host scopes
+lnk doctor --fix --prune-empty            # also remove empty host scopes and project storage
 lnk doctor --all                          # check all scopes
 ```
+
+`lnk doctor` checks project scope as well as host/common scope: it reports orphaned project storage, broken project symlinks, and `.lnkinclude` patterns that match no files. Project issues are listed with severity and a suggested fix.
 
 When restoring symlinks, if a real file exists at the target location (not a symlink), it will be renamed to `<path>.lnk-backup` to preserve your data before the symlink is created. Check for `.lnk-backup` files after running `restore`, `update`, or `doctor` if you expect them.
 
@@ -207,6 +209,12 @@ lnk project untrack --keep .crush/**      # remove a pattern but leave files man
 lnk project remove                        # stop managing the project, restore all files
 lnk project forget                        # stop managing the project, keep stored files
 
+# implicit detection in update/restore
+lnk update                                # also restores any detected project scope
+lnk restore                               # also restores any detected project scope
+lnk update --no-project                   # skip automatic project-scope detection
+lnk restore --no-project                  # skip automatic project-scope detection
+
 # global patterns (apply to every project)
 lnk project add --global AGENTS.md        # include AGENTS.md everywhere
 lnk project add '!AGENTS.md'              # then exclude it in one project
@@ -214,6 +222,8 @@ lnk project untrack --global AGENTS.md    # remove the global pattern
 ```
 
 Matched files are stored under `projects/<normalized-origin>/<path>/` in your lnk repo (derived from the project's origin remote) and symlinked back into the project. Existing files at symlink locations are backed up to `<path>.lnk-backup` during restore, just like host/common scope restores.
+
+`lnk update` and `lnk restore` automatically detect project scope when they run inside a git repo that contains a `.lnkinclude` file. The project scope is restored alongside the common and host scopes, and a `(project scope: <id>)` message is printed to stderr. Use the global `--no-project` flag to skip automatic detection.
 
 ### Notes and edge cases
 
@@ -248,9 +258,9 @@ man man/lnk-project-push.1                # read a generated page
 | `commit [-m message]` | Stage all changes and commit |
 | `push` | Push existing commits |
 | `pull` | Pull repo changes |
-| `restore [--host H] [--dry-run]` | Restore symlinks without pulling |
-| `update [--host H]` | Pull and restore the effective profile |
-| `doctor [--host H \| --all] [--fix] [--prune-empty]` | Audit and fix repo health |
+| `restore [--host H] [--dry-run] [--no-project]` | Restore symlinks without pulling (auto-detects project scope) |
+| `update [--host H] [--no-project]` | Pull and restore the effective profile (auto-detects project scope) |
+| `doctor [--host H \| --all] [--fix] [--prune-empty]` | Audit and fix repo health, including project scope |
 | `format [--v1 \| --v2]` | Migrate repo format |
 | `bootstrap` | Run bootstrap.sh explicitly |
 | `project init` | Activate project scope in the current git repo |
@@ -271,6 +281,7 @@ Available with all commands:
 | Option | Default | What it does |
 | --- | --- | --- |
 | `--repo <path>` | `~/.config/lnk` | Path to the lnk repository |
+| `--no-project` | `false` | Skip automatic project-scope detection |
 
 ## Acknowledgements
 

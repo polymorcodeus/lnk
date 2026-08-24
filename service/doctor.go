@@ -61,6 +61,15 @@ type DoctorReport struct {
 	UnmarkedProjects        []string // storage under projects/ without a marker
 	EmptyProjects           []string // marked projects with no stored files
 	PrunedProjects          []string // empty project storage removed by --fix --prune-empty
+	ProjectIssues           []ProjectIssue
+}
+
+// ProjectIssue captures a project-scope health finding for doctor.
+type ProjectIssue struct {
+	ProjectID  string
+	Issue      string
+	Severity   string // "error" or "warning"
+	Suggestion string
 }
 
 // HasIssues reports whether the doctor found actionable issues.
@@ -68,7 +77,7 @@ func (r DoctorReport) HasIssues() bool {
 	if r.MarkerMissing || len(r.Collisions) > 0 || len(r.EmptyScopes) > 0 {
 		return true
 	}
-	if len(r.UnmarkedProjects) > 0 || len(r.EmptyProjects) > 0 {
+	if len(r.UnmarkedProjects) > 0 || len(r.EmptyProjects) > 0 || len(r.ProjectIssues) > 0 {
 		return true
 	}
 	for _, result := range r.ScopeResults {
@@ -181,6 +190,12 @@ func (s *Service) doctorScan(ctx context.Context, host string, all bool) (Doctor
 	report.Projects = projects
 	report.UnmarkedProjects = unmarked
 	report.EmptyProjects = emptyProjects
+
+	projectIssues, err := s.scanProjectIssues(ctx)
+	if err != nil {
+		return DoctorReport{}, err
+	}
+	report.ProjectIssues = projectIssues
 
 	return report, nil
 }

@@ -470,3 +470,21 @@ func (s *Service) IsLnkRepository() bool {
 
 	return s.hasLnkMarker()
 }
+
+// isLnkRepoRoot reports whether root is the configured lnk repository or
+// carries the .lnkrepo marker. This prevents implicit project detection from
+// treating the lnk repo itself as a project.
+func (s *Service) isLnkRepoRoot(root string) bool {
+	if _, err := os.Stat(filepath.Join(root, repoMarkerFile)); err == nil {
+		return true
+	}
+	repoPath, err := filepath.EvalSymlinks(s.repoPath)
+	if err != nil {
+		return false
+	}
+	canonicalRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return false
+	}
+	return repoPath == canonicalRoot
+}
