@@ -82,36 +82,6 @@ func TestDoctor_ProjectIssues_BrokenSymlink(t *testing.T) {
 	}
 }
 
-func TestDoctor_ProjectIssues_EmptyPattern(t *testing.T) {
-	svc, home := testhelpers.TestHome(t)
-
-	projectDir := filepath.Join(home, "projects", "empty")
-	if err := os.MkdirAll(projectDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	testhelpers.InitGitRepo(t, projectDir)
-	if out, err := execGit(t, projectDir, "remote", "add", "origin", "git@github.com:alice/empty.git"); err != nil {
-		t.Fatalf("git remote add: %v\n%s", err, out)
-	}
-	if err := os.WriteFile(filepath.Join(projectDir, ".lnkinclude"), []byte(".nonexistent/**\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	ps := service.NewProjectService(svc)
-	if _, err := ps.ProjectPush(context.Background(), projectDir, false); err != nil {
-		t.Fatalf("ProjectPush: %v", err)
-	}
-
-	report, err := svc.Doctor(context.Background(), "", false, false, false)
-	if err != nil {
-		t.Fatalf("Doctor: %v", err)
-	}
-
-	if !hasProjectIssue(report.ProjectIssues, "github.com/alice/empty", "pattern matches no files") {
-		t.Errorf("ProjectIssues = %v, expected empty pattern issue", report.ProjectIssues)
-	}
-}
-
 func TestDoctor_ProjectIssues_NoIssues(t *testing.T) {
 	svc, home := testhelpers.TestHome(t)
 

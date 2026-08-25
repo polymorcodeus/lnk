@@ -8,8 +8,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-
-	"github.com/polymorcodeus/lnk/internal/patterns"
 )
 
 // scanProjectIssues runs project-scope health checks and returns any findings.
@@ -44,12 +42,6 @@ func (s *Service) scanProjectIssues(ctx context.Context) ([]ProjectIssue, error)
 		return nil, fmt.Errorf("find broken project symlinks: %w", err)
 	}
 	issues = append(issues, broken...)
-
-	emptyPatterns, err := s.findEmptyProjectPatterns(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("find empty project patterns: %w", err)
-	}
-	issues = append(issues, emptyPatterns...)
 
 	return issues, nil
 }
@@ -223,90 +215,6 @@ func (s *Service) findBrokenProjectSymlinks(ctx context.Context) ([]ProjectIssue
 			})
 			return nil
 		})
-	}
-
-	slices.SortFunc(issues, func(a, b ProjectIssue) int {
-		if cmp := strings.Compare(a.ProjectID, b.ProjectID); cmp != 0 {
-			return cmp
-		}
-		return strings.Compare(a.Issue, b.Issue)
-	})
-	return issues, nil
-}
-
-// findEmptyProjectPatterns reports .lnkinclude patterns that match no files in
-// the available project checkouts recorded in .lnkprojectcache.
-func (s *Service) findEmptyProjectPatterns(ctx context.Context) ([]ProjectIssue, error) {
-	ps := NewProjectService(s)
-	check, err := ps.CheckProjectCache(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	global, _ := patterns.Load(filepath.Join(s.repoPath, ".lnkinclude"))
-
-	var issues []ProjectIssue
-	for _, entry := range check.Available {
-		id := entry.ID
-		path := entry.Path
-		manifest := filepath.Join(path, ".lnkinclude")
-
-		local, err := patterns.Load(manifest)
-		if err != nil {
-			continue
-		}
-		allPatterns := append(global, local...)
-
-		patternMatches := make(map[string]int)
-		for _, p := range allPatterns {
-			if p == "" || strings.HasPrefix(p, "#") || strings.HasPrefix(p, "!") {
-				continue
-			}
-			patternMatches[p] = 0
-		}
-		if len(patternMatches) == 0 {
-			continue
-		}
-
-		_ = filepath.Walk(path, func(filePath string, fileInfo os.FileInfo, err error) error {
-			if err != nil || fileInfo.IsDir() {
-				return nil
-			}
-
-			rel, err := filepath.Rel(path, filePath)
-			if err != nil {
-				return nil
-			}
-			rel = filepath.ToSlash(rel)
-			if implicitlyExcluded(rel) {
-				return nil
-			}
-
-			for _, p := range allPatterns {
-				match, err := patterns.Match([]string{p}, rel)
-				if err != nil {
-					return nil
-				}
-				if match {
-					patternMatches[p]++
-				}
-			}
-			return nil
-		})
-
-		for pattern, count := range patternMatches {
-			if count > 0 {
-				continue
-			}
-			issues = append(issues, ProjectIssue{
-				ProjectID: id,
-				Issue:     fmt.Sprintf("pattern matches no files: %q", pattern),
-				Severity:  "warning",
-				Suggestion: fmt.Sprintf(
-					"check the pattern in %s or remove it if no longer needed",
-					manifest),
-			})
-		}
 	}
 
 	slices.SortFunc(issues, func(a, b ProjectIssue) int {
