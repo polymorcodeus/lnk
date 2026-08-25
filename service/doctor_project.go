@@ -10,18 +10,34 @@ import (
 	"strings"
 
 	"github.com/polymorcodeus/lnk/internal/patterns"
-	"github.com/polymorcodeus/lnk/internal/scope"
 )
 
 // scanProjectIssues runs project-scope health checks and returns any findings.
 func (s *Service) scanProjectIssues(ctx context.Context) ([]ProjectIssue, error) {
 	var issues []ProjectIssue
 
+	// Cache issues are reported first; orphaned storage skips IDs already
+	// covered by a cache issue to avoid duplicate warnings.
+	cacheIssues, err := s.findCacheIssues(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("check project cache: %w", err)
+	}
+	issues = append(issues, cacheIssues...)
+	cacheIDs := make(map[string]struct{})
+	for _, issue := range cacheIssues {
+		cacheIDs[issue.ProjectID] = struct{}{}
+	}
+
 	orphaned, err := s.findOrphanedProjectStorage(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("find orphaned project storage: %w", err)
 	}
-	issues = append(issues, orphaned...)
+	for _, issue := range orphaned {
+		if _, ok := cacheIDs[issue.ProjectID]; ok {
+			continue
+		}
+		issues = append(issues, issue)
+	}
 
 	broken, err := s.findBrokenProjectSymlinks(ctx)
 	if err != nil {
@@ -38,8 +54,43 @@ func (s *Service) scanProjectIssues(ctx context.Context) ([]ProjectIssue, error)
 	return issues, nil
 }
 
-// findOrphanedProjectStorage returns issues for stored projects whose ID does
-// not match any live project directory (identified by a .lnkinclude file).
+// findCacheIssues validates the machine-local .lnkprojectcache and returns
+// warnings for entries that point to missing or mismatched checkouts, as well
+// as stored projects with no cache entry at all.
+func (s *Service) findCacheIssues(ctx context.Context) ([]ProjectIssue, error) {
+	ps := NewProjectService(s)
+	check, err := ps.CheckProjectCache(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	var issues []ProjectIssue
+	for _, entry := range check.Missing {
+		issues = append(issues, ProjectIssue{
+			ProjectID:  entry.ID,
+			Issue:      "cached checkout path is missing or no longer matches the project origin",
+			Severity:   "warning",
+			Suggestion: "run 'lnk project cache --scan <dir>' to rediscover the checkout",
+		})
+	}
+	for _, id := range check.Uncached {
+		issues = append(issues, ProjectIssue{
+			ProjectID:  id,
+			Issue:      "no local checkout recorded in .lnkprojectcache",
+			Severity:   "warning",
+			Suggestion: "run 'lnk project cache --scan <dir>' to discover this project",
+		})
+	}
+
+	slices.SortFunc(issues, func(a, b ProjectIssue) int {
+		return strings.Compare(a.ProjectID, b.ProjectID)
+	})
+	return issues, nil
+}
+
+// findOrphanedProjectStorage returns issues for stored projects that have no
+// available local checkout recorded in .lnkprojectcache. Intentionally
+// not-downloaded projects are not reported as orphaned.
 func (s *Service) findOrphanedProjectStorage(ctx context.Context) ([]ProjectIssue, error) {
 	stored, err := s.storedProjectIDs()
 	if err != nil {
@@ -49,46 +100,35 @@ func (s *Service) findOrphanedProjectStorage(ctx context.Context) ([]ProjectIssu
 		return nil, nil
 	}
 
-	home, err := s.homeDir()
+	ps := NewProjectService(s)
+	check, err := ps.CheckProjectCache(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	liveIDs := make(map[string]struct{})
-	err = filepath.Walk(home, func(path string, info os.FileInfo, err error) error {
-		if err != nil || !info.IsDir() || info.Name() == ".git" {
-			return nil
-		}
-
-		manifest := filepath.Join(path, ".lnkinclude")
-		if _, statErr := os.Stat(manifest); errors.Is(statErr, os.ErrNotExist) {
-			return nil
-		} else if statErr != nil {
-			return statErr
-		}
-
-		id, err := resolveProjectID(ctx, path)
-		if err != nil {
-			return nil
-		}
-		liveIDs[id] = struct{}{}
-		return nil
-	})
-	if err != nil {
-		return nil, err
+	available := make(map[string]struct{})
+	for _, entry := range check.Available {
+		available[entry.ID] = struct{}{}
+	}
+	notDownloaded := make(map[string]struct{})
+	for _, entry := range check.NotDownloaded {
+		notDownloaded[entry.ID] = struct{}{}
 	}
 
 	var issues []ProjectIssue
 	for _, id := range stored {
-		if _, ok := liveIDs[id]; ok {
+		if _, ok := available[id]; ok {
+			continue
+		}
+		if _, ok := notDownloaded[id]; ok {
 			continue
 		}
 		issues = append(issues, ProjectIssue{
 			ProjectID: id,
-			Issue:     "orphaned project storage with no corresponding repo on disk",
+			Issue:     "orphaned project storage with no available local checkout",
 			Severity:  "warning",
 			Suggestion: fmt.Sprintf(
-				"run 'rm -rf %s' or verify the project is still needed",
+				"run 'lnk project cache --scan <dir>' to rediscover, or 'rm -rf %s' if the project is no longer needed",
 				filepath.Join(s.repoPath, "projects", id)),
 		})
 	}
@@ -132,31 +172,20 @@ func (s *Service) storedProjectIDs() ([]string, error) {
 	return result, nil
 }
 
-// findBrokenProjectSymlinks walks live project directories and reports
-// project-scope symlinks whose storage target no longer exists.
+// findBrokenProjectSymlinks walks the available project checkouts recorded in
+// .lnkprojectcache and reports project-scope symlinks whose storage target no
+// longer exists.
 func (s *Service) findBrokenProjectSymlinks(ctx context.Context) ([]ProjectIssue, error) {
-	home, err := s.homeDir()
+	ps := NewProjectService(s)
+	check, err := ps.CheckProjectCache(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var issues []ProjectIssue
-	err = filepath.Walk(home, func(path string, info os.FileInfo, err error) error {
-		if err != nil || !info.IsDir() || info.Name() == ".git" {
-			return nil
-		}
-
-		manifest := filepath.Join(path, ".lnkinclude")
-		if _, statErr := os.Stat(manifest); errors.Is(statErr, os.ErrNotExist) {
-			return nil
-		} else if statErr != nil {
-			return statErr
-		}
-
-		id, err := resolveProjectID(ctx, path)
-		if err != nil {
-			return nil
-		}
+	for _, entry := range check.Available {
+		id := entry.ID
+		path := entry.Path
 		storageDir := filepath.Join(s.repoPath, "projects", id)
 
 		_ = filepath.Walk(path, func(livePath string, liveInfo os.FileInfo, err error) error {
@@ -194,11 +223,6 @@ func (s *Service) findBrokenProjectSymlinks(ctx context.Context) ([]ProjectIssue
 			})
 			return nil
 		})
-
-		return nil
-	})
-	if err != nil {
-		return nil, err
 	}
 
 	slices.SortFunc(issues, func(a, b ProjectIssue) int {
@@ -211,35 +235,25 @@ func (s *Service) findBrokenProjectSymlinks(ctx context.Context) ([]ProjectIssue
 }
 
 // findEmptyProjectPatterns reports .lnkinclude patterns that match no files in
-// the project directory.
+// the available project checkouts recorded in .lnkprojectcache.
 func (s *Service) findEmptyProjectPatterns(ctx context.Context) ([]ProjectIssue, error) {
-	home, err := s.homeDir()
+	ps := NewProjectService(s)
+	check, err := ps.CheckProjectCache(ctx)
 	if err != nil {
 		return nil, err
 	}
 
+	global, _ := patterns.Load(filepath.Join(s.repoPath, ".lnkinclude"))
+
 	var issues []ProjectIssue
-	err = filepath.Walk(home, func(path string, info os.FileInfo, err error) error {
-		if err != nil || !info.IsDir() || info.Name() == ".git" {
-			return nil
-		}
-
+	for _, entry := range check.Available {
+		id := entry.ID
+		path := entry.Path
 		manifest := filepath.Join(path, ".lnkinclude")
-		if _, statErr := os.Stat(manifest); errors.Is(statErr, os.ErrNotExist) {
-			return nil
-		} else if statErr != nil {
-			return statErr
-		}
 
-		id, err := resolveProjectID(ctx, path)
-		if err != nil {
-			return nil
-		}
-
-		global, _ := patterns.Load(filepath.Join(s.repoPath, ".lnkinclude"))
 		local, err := patterns.Load(manifest)
 		if err != nil {
-			return nil
+			continue
 		}
 		allPatterns := append(global, local...)
 
@@ -251,7 +265,7 @@ func (s *Service) findEmptyProjectPatterns(ctx context.Context) ([]ProjectIssue,
 			patternMatches[p] = 0
 		}
 		if len(patternMatches) == 0 {
-			return nil
+			continue
 		}
 
 		_ = filepath.Walk(path, func(filePath string, fileInfo os.FileInfo, err error) error {
@@ -293,11 +307,6 @@ func (s *Service) findEmptyProjectPatterns(ctx context.Context) ([]ProjectIssue,
 					manifest),
 			})
 		}
-
-		return nil
-	})
-	if err != nil {
-		return nil, err
 	}
 
 	slices.SortFunc(issues, func(a, b ProjectIssue) int {
@@ -307,13 +316,4 @@ func (s *Service) findEmptyProjectPatterns(ctx context.Context) ([]ProjectIssue,
 		return strings.Compare(a.Issue, b.Issue)
 	})
 	return issues, nil
-}
-
-// homeDir returns the user's home directory. It prefers the home directory
-// embedded in the service's resolver when available.
-func (s *Service) homeDir() (string, error) {
-	if r, ok := s.resolver.(*scope.HomeRelativeResolver); ok {
-		return r.Home, nil
-	}
-	return os.UserHomeDir()
 }

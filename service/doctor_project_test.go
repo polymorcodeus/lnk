@@ -36,8 +36,8 @@ func TestDoctor_ProjectIssues_OrphanedStorage(t *testing.T) {
 	if !report.HasIssues() {
 		t.Fatal("expected doctor to report issues")
 	}
-	if !hasProjectIssue(report.ProjectIssues, "github.com/alice/orphaned", "orphaned") {
-		t.Errorf("ProjectIssues = %v, expected orphaned storage issue", report.ProjectIssues)
+	if !hasProjectIssue(report.ProjectIssues, "github.com/alice/orphaned", ".lnkprojectcache") {
+		t.Errorf("ProjectIssues = %v, expected cache issue for orphaned storage", report.ProjectIssues)
 	}
 	_ = home
 }
@@ -97,6 +97,11 @@ func TestDoctor_ProjectIssues_EmptyPattern(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	ps := service.NewProjectService(svc)
+	if _, err := ps.ProjectPush(context.Background(), projectDir, false); err != nil {
+		t.Fatalf("ProjectPush: %v", err)
+	}
+
 	report, err := svc.Doctor(context.Background(), "", false, false, false)
 	if err != nil {
 		t.Fatalf("Doctor: %v", err)
@@ -129,6 +134,9 @@ func TestDoctor_ProjectIssues_NoIssues(t *testing.T) {
 	if _, err := ps.ProjectPush(context.Background(), projectDir, false); err != nil {
 		t.Fatalf("ProjectPush: %v", err)
 	}
+	if _, err := ps.ProjectCacheDiscover(context.Background(), []string{filepath.Dir(projectDir)}); err != nil {
+		t.Fatalf("ProjectCacheDiscover: %v", err)
+	}
 
 	report, err := svc.Doctor(context.Background(), "", false, false, false)
 	if err != nil {
@@ -146,4 +154,52 @@ func hasProjectIssue(issues []service.ProjectIssue, projectID, issueSubstr strin
 	return slices.ContainsFunc(issues, func(i service.ProjectIssue) bool {
 		return i.ProjectID == projectID && strings.Contains(i.Issue, issueSubstr)
 	})
+}
+
+func TestDoctor_ProjectIssues_CacheMissing(t *testing.T) {
+	svc, home := testhelpers.TestHome(t)
+	repoDir := filepath.Join(home, "projects", "myapp")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	testhelpers.InitGitRepo(t, repoDir)
+	if out, err := execGit(t, repoDir, "remote", "add", "origin", "git@github.com:alice/myapp.git"); err != nil {
+		t.Fatalf("git remote add: %v\n%s", err, out)
+	}
+
+	ps := service.NewProjectService(svc)
+	if _, _, err := ps.ProjectAddPattern(context.Background(), repoDir, "config"); err != nil {
+		t.Fatalf("add pattern: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "config"), []byte("config"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ps.ProjectPush(context.Background(), repoDir, false); err != nil {
+		t.Fatalf("push: %v", err)
+	}
+	// ProjectPush records the cache; clear it to verify the doctor warning.
+	if err := os.Remove(filepath.Join(svc.RepoPath(), ".lnkprojectcache")); err != nil && !os.IsNotExist(err) {
+		t.Fatalf("clear cache: %v", err)
+	}
+
+	// No cache entry exists yet, so doctor reports the project as uncached.
+	report, err := svc.Doctor(context.Background(), "", false, false, false)
+	if err != nil {
+		t.Fatalf("Doctor: %v", err)
+	}
+	if !hasProjectIssue(report.ProjectIssues, "github.com/alice/myapp", ".lnkprojectcache") {
+		t.Errorf("expected cache issue, got %v", report.ProjectIssues)
+	}
+
+	// Repair via project cache --scan.
+	if _, err := ps.ProjectCacheDiscover(context.Background(), []string{filepath.Dir(repoDir)}); err != nil {
+		t.Fatalf("ProjectCacheDiscover: %v", err)
+	}
+	report, err = svc.Doctor(context.Background(), "", false, false, false)
+	if err != nil {
+		t.Fatalf("Doctor after cache repair: %v", err)
+	}
+	if hasProjectIssue(report.ProjectIssues, "github.com/alice/myapp", ".lnkprojectcache") {
+		t.Errorf("expected cache issue to be repaired, got %v", report.ProjectIssues)
+	}
 }
