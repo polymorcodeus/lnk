@@ -177,6 +177,7 @@ func newProjectCmd(repoFlag *string) *cobra.Command {
 	cmd.AddCommand(newProjectUntrackCmd(repoFlag))
 	cmd.AddCommand(newProjectPushCmd(repoFlag))
 	cmd.AddCommand(newProjectSyncCmd(repoFlag))
+	cmd.AddCommand(newProjectCacheCmd(repoFlag))
 	cmd.AddCommand(newProjectRestoreCmd(repoFlag))
 	cmd.AddCommand(newProjectPullCmd(repoFlag))
 	cmd.AddCommand(newProjectRemoveCmd(repoFlag))
@@ -428,63 +429,167 @@ func newProjectSyncCmd(repoFlag *string) *cobra.Command {
 	var dryRun bool
 	var pruneDeletions bool
 	var force bool
+	var all bool
 
 	cmd := &cobra.Command{
-		Use:   "sync [--dry-run] [--prune-deletions] [--force]",
+		Use:   "sync [--all] [--dry-run] [--prune-deletions] [--force]",
 		Short: "Reconcile patterns, live files, and project storage",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ps := service.NewProjectService(svc(repoFlag))
+
+			if all {
+				result, err := ps.ProjectSyncAll(cmd.Context(), dryRun, pruneDeletions, force)
+				if err != nil {
+					return err
+				}
+				return printProjectSyncAll(cmd.OutOrStdout(), cmd.ErrOrStderr(), result, dryRun)
+			}
+
 			projectRoot, err := projectDir(cmd)
 			if err != nil {
 				return err
 			}
 
-			ps := service.NewProjectService(svc(repoFlag))
 			result, err := ps.ProjectSync(cmd.Context(), projectRoot, dryRun, pruneDeletions, force)
 			if err != nil {
 				return err
 			}
 
-			w := cmd.OutOrStdout()
-			if err := printSyncSection(w, dryRunPrefix(dryRun, "Synced", "Would sync"), result.Synced, "file(s) to project storage"); err != nil {
-				return err
-			}
-			if err := printSyncSection(w, dryRunPrefix(dryRun, "Restored", "Would restore"), result.Released, "file(s) to the project"); err != nil {
-				return err
-			}
-			if err := printSyncSection(w, dryRunPrefix(dryRun, "Backed up", "Would back up"), result.BackedUp, "conflicting file(s)"); err != nil {
-				return err
-			}
-			if err := printSyncSection(w, dryRunPrefix(dryRun, "Pruned", "Would prune"), result.Pruned, "stored file(s) deleted from the project"); err != nil {
-				return err
-			}
-			if len(result.Deletions) > 0 {
-				if _, err := fmt.Fprintf(w, "%d stored file(s) no longer exist in the project (run with --prune-deletions to drop them):\n", len(result.Deletions)); err != nil {
-					return err
-				}
-				for _, path := range result.Deletions {
-					if _, err := fmt.Fprintf(w, "  %s\n", path); err != nil {
-						return err
-					}
-				}
-			}
-			for _, path := range result.SkippedTracked {
-				if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "warning: skipped '%s': tracked by this repo's git (add '!%s' to .lnkinclude, or use --force)\n", path, path); err != nil {
-					return err
-				}
-			}
-
-			if len(result.Synced)+len(result.Released)+len(result.Pruned)+len(result.Deletions) == 0 {
-				_, err = fmt.Fprintln(w, "Project storage is in sync with the effective patterns")
-				return err
-			}
-			return nil
+			return printProjectSync(cmd.OutOrStdout(), cmd.ErrOrStderr(), result, dryRun)
 		},
 	}
 
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview reconciliation without changing files")
 	cmd.Flags().BoolVar(&pruneDeletions, "prune-deletions", false, "delete stored files whose live copies were deleted")
 	cmd.Flags().BoolVar(&force, "force", false, "also manage files tracked by the project's own git")
+	cmd.Flags().BoolVar(&all, "all", false, "reconcile every stored project using .lnkprojectcache")
 	return cmd
+}
+
+// newProjectCacheCmd returns the "project cache" subcommand.
+func newProjectCacheCmd(repoFlag *string) *cobra.Command {
+	var scanRoots []string
+
+	cmd := &cobra.Command{
+		Use:   "cache --scan path [--scan path]...",
+		Short: "Discover local project checkouts and update .lnkprojectcache",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ps := service.NewProjectService(svc(repoFlag))
+			result, err := ps.ProjectCacheDiscover(cmd.Context(), scanRoots)
+			if err != nil {
+				return err
+			}
+
+			w := cmd.OutOrStdout()
+			if len(result.Discovered) > 0 {
+				if _, err := fmt.Fprintf(w, "Discovered %d project(s):\n", len(result.Discovered)); err != nil {
+					return err
+				}
+				for _, id := range result.Discovered {
+					if _, err := fmt.Fprintf(w, "  %s\n", id); err != nil {
+						return err
+					}
+				}
+			}
+			if len(result.Validated) > 0 {
+				if _, err := fmt.Fprintf(w, "Validated %d project(s):\n", len(result.Validated)); err != nil {
+					return err
+				}
+				for _, id := range result.Validated {
+					if _, err := fmt.Fprintf(w, "  %s\n", id); err != nil {
+						return err
+					}
+				}
+			}
+			if len(result.Missing) > 0 {
+				if _, err := fmt.Fprintf(w, "Marked %d project(s) as missing:\n", len(result.Missing)); err != nil {
+					return err
+				}
+				for _, id := range result.Missing {
+					if _, err := fmt.Fprintf(w, "  %s\n", id); err != nil {
+						return err
+					}
+				}
+			}
+			if len(result.Removed) > 0 {
+				if _, err := fmt.Fprintf(w, "Removed %d stale cache entry(ies):\n", len(result.Removed)); err != nil {
+					return err
+				}
+				for _, id := range result.Removed {
+					if _, err := fmt.Fprintf(w, "  %s\n", id); err != nil {
+						return err
+					}
+				}
+			}
+			if len(result.Discovered)+len(result.Validated)+len(result.Missing)+len(result.Removed) == 0 {
+				_, err = fmt.Fprintln(w, "No changes to project cache")
+			}
+			return err
+		},
+	}
+
+	cmd.Flags().StringArrayVar(&scanRoots, "scan", nil, "directory to scan for local project checkouts (repeatable)")
+	_ = cmd.MarkFlagRequired("scan")
+	return cmd
+}
+
+// printProjectSync writes the output for a single project sync result.
+func printProjectSync(w, errW io.Writer, result service.ProjectSyncResult, dryRun bool) error {
+	if err := printSyncSection(w, dryRunPrefix(dryRun, "Synced", "Would sync"), result.Synced, "file(s) to project storage"); err != nil {
+		return err
+	}
+	if err := printSyncSection(w, dryRunPrefix(dryRun, "Restored", "Would restore"), result.Released, "file(s) to the project"); err != nil {
+		return err
+	}
+	if err := printSyncSection(w, dryRunPrefix(dryRun, "Backed up", "Would back up"), result.BackedUp, "conflicting file(s)"); err != nil {
+		return err
+	}
+	if err := printSyncSection(w, dryRunPrefix(dryRun, "Pruned", "Would prune"), result.Pruned, "stored file(s) deleted from the project"); err != nil {
+		return err
+	}
+	if len(result.Deletions) > 0 {
+		if _, err := fmt.Fprintf(w, "%d stored file(s) no longer exist in the project (run with --prune-deletions to drop them):\n", len(result.Deletions)); err != nil {
+			return err
+		}
+		for _, path := range result.Deletions {
+			if _, err := fmt.Fprintf(w, "  %s\n", path); err != nil {
+				return err
+			}
+		}
+	}
+	for _, path := range result.SkippedTracked {
+		if _, err := fmt.Fprintf(errW, "warning: skipped '%s': tracked by this repo's git (add '!%s' to .lnkinclude, or use --force)\n", path, path); err != nil {
+			return err
+		}
+	}
+
+	if len(result.Synced)+len(result.Released)+len(result.Pruned)+len(result.Deletions) == 0 {
+		_, err := fmt.Fprintln(w, "Project storage is in sync with the effective patterns")
+		return err
+	}
+	return nil
+}
+
+// printProjectSyncAll writes the output for `lnk project sync --all`.
+func printProjectSyncAll(w, errW io.Writer, result service.ProjectSyncAllResult, dryRun bool) error {
+	for _, res := range result.Results {
+		if _, err := fmt.Fprintf(w, "# %s\n", res.ProjectID); err != nil {
+			return err
+		}
+		if err := printProjectSync(w, errW, res, dryRun); err != nil {
+			return err
+		}
+	}
+	for _, id := range result.Unavailable {
+		if _, err := fmt.Fprintf(errW, "warning: skipping %s: local checkout not found in scan roots\n", id); err != nil {
+			return err
+		}
+	}
+	if len(result.Results) == 0 && len(result.Unavailable) == 0 {
+		_, err := fmt.Fprintln(w, "No stored projects")
+		return err
+	}
+	return nil
 }
 
 // printSyncSection writes one titled list section of sync output.

@@ -1270,6 +1270,176 @@ func TestProjectSync_SkipsProjectGitTrackedUnlessForced(t *testing.T) {
 	}
 }
 
+func TestProjectSyncAll_DiscoversAndSyncsMultipleProjects(t *testing.T) {
+	svc, home := testhelpers.TestHome(t)
+	parent := filepath.Join(home, "repos")
+
+	// First project: alpha.
+	alphaDir := filepath.Join(parent, "alpha")
+	testhelpers.MakeDir(t, alphaDir)
+	initProjectRepoWithRemote(t, alphaDir, "git@github.com:User/Alpha.git")
+	ps := service.NewProjectService(svc)
+	if _, _, err := ps.ProjectAddPattern(context.Background(), alphaDir, ".todo/**"); err != nil {
+		t.Fatalf("add pattern alpha: %v", err)
+	}
+	testhelpers.MakeFile(t, filepath.Join(alphaDir, ".todo", "a.md"), "alpha\n")
+	if _, err := ps.ProjectPush(context.Background(), alphaDir, false); err != nil {
+		t.Fatalf("push alpha: %v", err)
+	}
+
+	// Second project: beta.
+	betaDir := filepath.Join(parent, "beta")
+	testhelpers.MakeDir(t, betaDir)
+	initProjectRepoWithRemote(t, betaDir, "git@github.com:User/Beta.git")
+	if _, _, err := ps.ProjectAddPattern(context.Background(), betaDir, "notes.md"); err != nil {
+		t.Fatalf("add pattern beta: %v", err)
+	}
+	testhelpers.MakeFile(t, filepath.Join(betaDir, "notes.md"), "beta\n")
+	if _, err := ps.ProjectPush(context.Background(), betaDir, false); err != nil {
+		t.Fatalf("push beta: %v", err)
+	}
+
+	// Add new files and run sync --all over the parent directory.
+	testhelpers.MakeFile(t, filepath.Join(alphaDir, ".todo", "b.md"), "alpha b\n")
+	testhelpers.MakeFile(t, filepath.Join(betaDir, "notes2.md"), "beta 2\n")
+	if _, _, err := ps.ProjectAddPattern(context.Background(), betaDir, "notes2.md"); err != nil {
+		t.Fatalf("add pattern notes2: %v", err)
+	}
+
+	// Populate the local cache by discovering checkouts under parent.
+	if _, err := ps.ProjectCacheDiscover(context.Background(), []string{parent}); err != nil {
+		t.Fatalf("ProjectCacheDiscover: %v", err)
+	}
+
+	result, err := ps.ProjectSyncAll(context.Background(), false, false, false)
+	if err != nil {
+		t.Fatalf("ProjectSyncAll: %v", err)
+	}
+	if len(result.Unavailable) != 0 {
+		t.Errorf("unavailable = %v, want none", result.Unavailable)
+	}
+	if len(result.Results) != 2 {
+		t.Fatalf("results = %d, want 2", len(result.Results))
+	}
+
+	byID := map[string]int{}
+	for _, r := range result.Results {
+		byID[r.ProjectID] = len(r.Synced)
+	}
+	if byID["github.com/user/alpha"] != 1 {
+		t.Errorf("alpha synced = %d, want 1", byID["github.com/user/alpha"])
+	}
+	if byID["github.com/user/beta"] != 1 {
+		t.Errorf("beta synced = %d, want 1", byID["github.com/user/beta"])
+	}
+}
+
+func TestProjectSyncAll_ReportsUnavailable(t *testing.T) {
+	svc, home := testhelpers.TestHome(t)
+	parent := filepath.Join(home, "repos")
+
+	// Push a project but do not discover its checkout.
+	repoDir := filepath.Join(parent, "hermes")
+	testhelpers.MakeDir(t, repoDir)
+	initProjectRepo(t, repoDir)
+	ps := service.NewProjectService(svc)
+	if _, _, err := ps.ProjectAddPattern(context.Background(), repoDir, ".todo/**"); err != nil {
+		t.Fatalf("add pattern: %v", err)
+	}
+	testhelpers.MakeFile(t, filepath.Join(repoDir, ".todo", "a.md"), "a\n")
+	if _, err := ps.ProjectPush(context.Background(), repoDir, false); err != nil {
+		t.Fatalf("push: %v", err)
+	}
+	// ProjectPush records the cache; clear it and then discover an empty
+	// directory so the cache records the project as missing.
+	if err := os.Remove(filepath.Join(svc.RepoPath(), ".lnkprojectcache")); err != nil && !os.IsNotExist(err) {
+		t.Fatalf("clear cache: %v", err)
+	}
+	emptyDir := filepath.Join(home, "empty")
+	testhelpers.MakeDir(t, emptyDir)
+	if _, err := ps.ProjectCacheDiscover(context.Background(), []string{emptyDir}); err != nil {
+		t.Fatalf("ProjectCacheDiscover: %v", err)
+	}
+
+	result, err := ps.ProjectSyncAll(context.Background(), false, false, false)
+	if err != nil {
+		t.Fatalf("ProjectSyncAll: %v", err)
+	}
+	if len(result.Results) != 0 {
+		t.Errorf("results = %v, want none", result.Results)
+	}
+	if len(result.Unavailable) != 1 || result.Unavailable[0] != "github.com/user/repo" {
+		t.Errorf("unavailable = %v, want [github.com/user/repo]", result.Unavailable)
+	}
+}
+
+func TestProjectSyncAll_DryRun(t *testing.T) {
+	svc, ps, repoDir, id := newPushedProject(t, ".todo/**", ".todo/a.md")
+	parent := filepath.Dir(repoDir)
+
+	newFile := filepath.Join(repoDir, ".todo", "b.md")
+	testhelpers.MakeFile(t, newFile, "b\n")
+
+	if _, err := ps.ProjectCacheDiscover(context.Background(), []string{parent}); err != nil {
+		t.Fatalf("ProjectCacheDiscover: %v", err)
+	}
+
+	before := len(testhelpers.GitLog(t, svc.RepoPath()))
+	result, err := ps.ProjectSyncAll(context.Background(), true, false, false)
+	if err != nil {
+		t.Fatalf("ProjectSyncAll: %v", err)
+	}
+	if len(result.Results) != 1 {
+		t.Fatalf("results = %d, want 1", len(result.Results))
+	}
+	if len(result.Results[0].Synced) != 1 || result.Results[0].Synced[0] != ".todo/b.md" {
+		t.Errorf("synced = %v, want [.todo/b.md]", result.Results[0].Synced)
+	}
+
+	if testhelpers.FileExists(t, filepath.Join(svc.RepoPath(), "projects", id, ".todo", "b.md")) {
+		t.Error("expected dry-run to leave storage untouched")
+	}
+	if after := len(testhelpers.GitLog(t, svc.RepoPath())); after != before {
+		t.Errorf("expected no commit in dry-run, log grew from %d to %d", before, after)
+	}
+}
+
+func TestProjectSyncAll_NoStoredProjects(t *testing.T) {
+	svc, home := testhelpers.TestHome(t)
+	scanDir := filepath.Join(home, "scan")
+	testhelpers.MakeDir(t, scanDir)
+	ps := service.NewProjectService(svc)
+
+	result, err := ps.ProjectSyncAll(context.Background(), false, false, false)
+	if err != nil {
+		t.Fatalf("ProjectSyncAll: %v", err)
+	}
+	if len(result.Results) != 0 || len(result.Unavailable) != 0 {
+		t.Errorf("unexpected results: %+v", result)
+	}
+}
+
+func initProjectRepoWithRemote(t *testing.T, dir, remote string) {
+	t.Helper()
+	testhelpers.InitGitRepo(t, dir)
+	if out, err := exec.Command("git", "-C", dir, "remote", "add", "origin", remote).CombinedOutput(); err != nil {
+		t.Fatalf("git remote add: %v\n%s", err, out)
+	}
+	readme := filepath.Join(dir, "README.md")
+	if err := os.WriteFile(readme, []byte("# repo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmds := [][]string{
+		{"git", "-C", dir, "add", "."},
+		{"git", "-C", dir, "commit", "-m", "init"},
+	}
+	for _, args := range cmds {
+		if out, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
+			t.Fatalf("%v: %v\n%s", args, err, out)
+		}
+	}
+}
+
 func TestProjectRemove_RestoresFilesAndDropsStorage(t *testing.T) {
 	svc, ps, repoDir, id := newPushedProject(t, ".cursor/**", ".cursor/rules.md", ".cursor/extra.md")
 	storageDir := filepath.Join(svc.RepoPath(), "projects", id)

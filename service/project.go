@@ -535,6 +535,10 @@ func (ps *ProjectService) ProjectPush(ctx context.Context, projectRoot string, f
 		return result, fmt.Errorf("%w: %w", lnkerror.ErrSyncFailed, errors.Join(stats.failed...))
 	}
 
+	if err := ps.recordProjectCache(ctx, root, id); err != nil {
+		return result, err
+	}
+
 	return result, nil
 }
 
@@ -880,7 +884,150 @@ func (ps *ProjectService) ProjectSync(ctx context.Context, projectRoot string, d
 		return result, fmt.Errorf("%w: %w", lnkerror.ErrSyncFailed, errors.Join(stats.failed...))
 	}
 
+	if err := ps.recordProjectCache(ctx, root, id); err != nil {
+		return result, err
+	}
+
 	return result, nil
+}
+
+// ProjectSyncAllResult reports the outcome of syncing every stored project.
+type ProjectSyncAllResult struct {
+	// Results contains the per-project reconciliation outcomes for projects
+	// listed as available in the local cache.
+	Results []ProjectSyncResult
+	// Unavailable lists stored project IDs whose cache entry is missing or not
+	// available on this machine.
+	Unavailable []string
+}
+
+// ProjectSyncAll reconciles every stored project that is marked available in
+// the machine-local .lnkprojectcache. Projects marked not-downloaded or
+// missing, or projects with no cache entry, are reported in Unavailable.
+// Errors from individual projects are joined and returned alongside the
+// partial result.
+func (ps *ProjectService) ProjectSyncAll(ctx context.Context, dryRun, pruneDeletions, force bool) (ProjectSyncAllResult, error) {
+	stored, err := ps.ProjectListProjects()
+	if err != nil {
+		return ProjectSyncAllResult{}, err
+	}
+	if len(stored) == 0 {
+		return ProjectSyncAllResult{}, nil
+	}
+
+	cache, err := ps.LoadProjectCache()
+	if err != nil {
+		return ProjectSyncAllResult{}, err
+	}
+
+	result := ProjectSyncAllResult{}
+	var errs []error
+	for _, p := range stored {
+		entry, ok := cache.Get(p.ID)
+		if !ok || entry.State != CacheStateAvailable {
+			result.Unavailable = append(result.Unavailable, p.ID)
+			continue
+		}
+
+		res, err := ps.ProjectSync(ctx, entry.Path, dryRun, pruneDeletions, force)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", p.ID, err))
+		}
+		result.Results = append(result.Results, res)
+	}
+
+	return result, errors.Join(errs...)
+}
+
+// discoverProjectRoots scans scanRoots for git working trees and returns a map
+// from project ID to the discovered local checkout paths. Hidden directories
+// (except .git itself) are skipped, nested git directories are skipped once a
+// repo root is found, and the lnk repository itself is excluded.
+func (ps *ProjectService) discoverProjectRoots(ctx context.Context, scanRoots []string) (map[string][]string, error) {
+	result := make(map[string][]string)
+	seen := make(map[string]struct{})
+
+	for _, root := range scanRoots {
+		info, err := os.Stat(root)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return nil, fmt.Errorf("scan root %s: %w", root, err)
+		}
+		if !info.IsDir() {
+			continue
+		}
+
+		absRoot, err := filepath.Abs(root)
+		if err != nil {
+			return nil, fmt.Errorf("resolve scan root %s: %w", root, err)
+		}
+
+		if err := filepath.Walk(absRoot, func(path string, fi os.FileInfo, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if fi.IsDir() && path != absRoot {
+				name := fi.Name()
+				// Skip hidden directories except the .git directories we are
+				// explicitly looking for.
+				if strings.HasPrefix(name, ".") && name != ".git" {
+					return filepath.SkipDir
+				}
+				// Avoid descending into the lnk repo or its storage.
+				if ps.svc.isLnkRepoRoot(path) {
+					return filepath.SkipDir
+				}
+				// Bound the scan depth to avoid walking huge trees.
+				rel, err := filepath.Rel(absRoot, path)
+				if err != nil {
+					return err
+				}
+				if depth(rel) > 3 {
+					return filepath.SkipDir
+				}
+			}
+
+			if !fi.IsDir() || fi.Name() != ".git" {
+				return nil
+			}
+
+			repoRoot := filepath.Dir(path)
+			if _, ok := seen[repoRoot]; ok {
+				return filepath.SkipDir
+			}
+			seen[repoRoot] = struct{}{}
+
+			if ps.svc.isLnkRepoRoot(repoRoot) {
+				return filepath.SkipDir
+			}
+
+			id, err := ps.projectID(ctx, repoRoot)
+			if err != nil {
+				// Repos without a resolvable ID are ignored.
+				if errors.Is(err, resolver.ErrNoOrigin) {
+					return filepath.SkipDir
+				}
+				return err
+			}
+			result[id] = append(result[id], repoRoot)
+			return filepath.SkipDir
+		}); err != nil {
+			return nil, err
+		}
+	}
+
+	return result, nil
+}
+
+// depth counts the number of path components in rel, which is assumed to use
+// the local separator.
+func depth(rel string) int {
+	if rel == "." {
+		return 0
+	}
+	return len(strings.Split(rel, string(filepath.Separator)))
 }
 
 // ProjectRemoveResult reports the outcome of ProjectRemove.
