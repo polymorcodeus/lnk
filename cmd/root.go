@@ -58,6 +58,7 @@ func NewRootCommand() *cobra.Command {
 	rootCmd.AddCommand(newBootstrapCmd(&repoPath))
 	rootCmd.AddCommand(newFormatCmd(&repoPath))
 	rootCmd.AddCommand(newHomeCmd(&repoPath))
+	rootCmd.AddCommand(newHooksCmd(&repoPath))
 
 	return rootCmd
 }
@@ -1054,6 +1055,16 @@ func printRestore(w io.Writer, info service.RestoreInfo, dryRun bool) error {
 			return err
 		}
 		for _, path := range info.BackedUp {
+			if _, err := fmt.Fprintf(w, "  %s\n", path); err != nil {
+				return err
+			}
+		}
+	}
+	if len(info.Collisions) > 0 {
+		if _, err := fmt.Fprintf(w, "Skipped %d path(s) with existing files (collisions reported by hook)\n", len(info.Collisions)); err != nil {
+			return err
+		}
+		for _, path := range info.Collisions {
 			if _, err := fmt.Fprintf(w, "  %s\n", path); err != nil {
 				return err
 			}

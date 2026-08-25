@@ -163,7 +163,7 @@ lnk doctor --all                          # check all scopes
 
 `lnk doctor` checks project scope as well as host/common scope: it reports orphaned project storage, broken project symlinks, and `.lnkinclude` patterns that match no files. Project issues are listed with severity and a suggested fix.
 
-When restoring symlinks, if a real file exists at the target location (not a symlink), it will be renamed to `<path>.lnk-backup` to preserve your data before the symlink is created. Check for `.lnk-backup` files after running `restore`, `update`, or `doctor` if you expect them.
+When restoring symlinks, if a real file exists at the target location (not a symlink), it will be renamed to `<path>.lnk-backup` to preserve your data before the symlink is created. Check for `.lnk-backup` files after running `restore`, `update`, or `doctor` if you expect them. The git hook path (`lnk hooks run ...`) is collision-safe and does not create `.lnk-backup` files; it reports collisions to stderr and leaves the real file in place.
 
 ### Format migration
 
@@ -233,6 +233,21 @@ Matched files are stored under `projects/<normalized-origin>/<path>/` in your ln
 - **The lnk repo protects itself.** Project commands refuse to run inside the lnk repository (or any clone of it) to prevent storing it inside its own storage.
 - **Reconciliation is explicit for deletions.** `project sync` reports stored files whose live copies were deleted; they are only removed from storage with `--prune-deletions`.
 
+### Hooks
+
+Install opt-in git hooks so lnk restores symlinks automatically after git operations.
+
+```bash
+lnk hooks install                             # post-merge hook in ~/.config/lnk
+lnk hooks install --project                   # post-checkout hook in current project repo
+lnk hooks uninstall                           # remove lnk's post-merge hook
+lnk hooks uninstall --project                 # remove lnk's post-checkout hook
+```
+
+The `post-merge` hook runs inside the lnk repo after a `git pull` and recreates any missing common-scope symlinks. The `post-checkout` hook runs inside a project repo after switching branches and recreates missing project-scope symlinks. Both hooks are collision-safe: if a real file occupies a symlink target, the hook reports the collision to stderr and leaves the file untouched (no `.lnk-backup`).
+
+Hooks are installed as shell scripts that delegate to `lnk hooks run <hook-name>`, so they always use the same lnk binary that was present at install time.
+
 ## Man pages
 
 Man pages are generated from the Cobra command tree and ship with release archives.
@@ -273,6 +288,9 @@ man man/lnk-project-push.1                # read a generated page
 | `project pull [--force]` | Pull lnk repo and restore project symlinks |
 | `project remove` | Stop managing the project: restore all files and delete storage |
 | `project forget` | Stop managing the project but keep stored files |
+| `hooks install [--project]` | Install lnk's git hooks |
+| `hooks uninstall [--project]` | Remove lnk's git hooks |
+| `hooks run <hook-name> [args...]` | Entry point used by installed git hook scripts |
 
 ## Global Options
 

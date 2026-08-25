@@ -248,29 +248,11 @@ func (ps *ProjectService) resolveProjectRoot(ctx context.Context, dir string) (s
 		return "", lnkerror.WithPathAndSuggestion(lnkerror.ErrOutsideGitRepo, abs, "use 'lnk add' for host/common scope")
 	}
 
-	if ps.isLnkRepoRoot(root) {
+	if ps.svc.isLnkRepoRoot(root) {
 		return "", lnkerror.WithPathAndSuggestion(lnkerror.ErrIsLnkRepository, root, "the lnk repo manages itself; project scope is for other git repositories")
 	}
 
 	return root, nil
-}
-
-// isLnkRepoRoot reports whether root is an lnk repository: either it carries
-// the .lnkrepo marker (including clones of the repo elsewhere on disk) or it
-// resolves to the configured repo path.
-func (ps *ProjectService) isLnkRepoRoot(root string) bool {
-	if _, err := os.Stat(filepath.Join(root, repoMarkerFile)); err == nil {
-		return true
-	}
-	repoPath, err := filepath.EvalSymlinks(ps.svc.RepoPath())
-	if err != nil {
-		return false
-	}
-	canonicalRoot, err := filepath.EvalSymlinks(root)
-	if err != nil {
-		return false
-	}
-	return repoPath == canonicalRoot
 }
 
 // projectID resolves the storage identifier for the project, falling back to
@@ -1391,9 +1373,12 @@ func (ps *ProjectService) ProjectRestore(ctx context.Context, projectRoot string
 
 		if liveExists {
 			if liveIsSymlink {
+				if isManagedSymlink(livePath, path) {
+					return nil
+				}
 				if !dryRun {
 					if err := os.Remove(livePath); err != nil {
-						return fmt.Errorf("replace symlink %s: %w", livePath, err)
+						return fmt.Errorf("replace stale symlink %s: %w", livePath, err)
 					}
 				}
 			} else {
@@ -1415,6 +1400,115 @@ func (ps *ProjectService) ProjectRestore(ctx context.Context, projectRoot string
 			return nil
 		}
 
+		if err := os.MkdirAll(filepath.Dir(livePath), 0o755); err != nil {
+			return fmt.Errorf("create live parent directory: %w", err)
+		}
+		if err := fs.CreateSymlink(path, livePath); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return info, err
+	}
+
+	return info, nil
+}
+
+// ProjectRestoreHook is the collision-safe variant of ProjectRestore used by
+// the post-checkout git hook. It creates missing symlinks, skips symlinks
+// that already point to the correct storage target, replaces symlinks that
+// point elsewhere, and reports real-file collisions without backing them up.
+// It never returns an error for a per-file collision; collisions are collected
+// in RestoreInfo.Collisions and reported by the caller.
+func (ps *ProjectService) ProjectRestoreHook(ctx context.Context, projectRoot string) (RestoreInfo, error) {
+	root, err := ps.resolveProjectRoot(ctx, projectRoot)
+	if err != nil {
+		return RestoreInfo{}, err
+	}
+
+	id, err := ps.projectID(ctx, root)
+	if err != nil {
+		return RestoreInfo{}, err
+	}
+
+	storageDir := filepath.Join(ps.svc.RepoPath(), "projects", id)
+	if _, err := os.Stat(storageDir); os.IsNotExist(err) {
+		return RestoreInfo{}, nil
+	}
+
+	tracked, err := projectTrackedFiles(ctx, root)
+	if err != nil {
+		return RestoreInfo{}, err
+	}
+
+	effective, err := ps.effectivePatterns(root)
+	if err != nil {
+		return RestoreInfo{}, err
+	}
+
+	r := &scope.ProjectRootResolver{
+		GitRoot:    root,
+		StorageDir: storageDir,
+	}
+
+	info := RestoreInfo{}
+	fs := &fspkg.FileSystem{}
+
+	err = filepath.Walk(storageDir, func(path string, fi os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if fi.IsDir() {
+			return nil
+		}
+
+		rel, err := filepath.Rel(storageDir, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		if rel == projectMarkerFile {
+			return nil
+		}
+
+		match, err := patterns.Match(effective, rel)
+		if err != nil {
+			return err
+		}
+		if !match {
+			return nil
+		}
+
+		livePath, err := r.ToLive(rel)
+		if err != nil {
+			return err
+		}
+
+		liveInfo, statErr := os.Lstat(livePath)
+		liveExists := statErr == nil
+		liveIsSymlink := liveExists && liveInfo.Mode()&os.ModeSymlink != 0
+
+		if _, ok := tracked[rel]; ok && !liveIsSymlink {
+			info.Collisions = append(info.Collisions, rel)
+			return nil
+		}
+
+		if liveExists {
+			if liveIsSymlink {
+				if isManagedSymlink(livePath, path) {
+					return nil
+				}
+				if err := os.Remove(livePath); err != nil {
+					return fmt.Errorf("replace stale symlink %s: %w", livePath, err)
+				}
+			} else {
+				info.Collisions = append(info.Collisions, rel)
+				return nil
+			}
+		}
+
+		info.Restored = append(info.Restored, rel)
 		if err := os.MkdirAll(filepath.Dir(livePath), 0o755); err != nil {
 			return fmt.Errorf("create live parent directory: %w", err)
 		}

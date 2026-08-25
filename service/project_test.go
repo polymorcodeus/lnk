@@ -1460,6 +1460,142 @@ func TestProjectRestore_GatesOnPatterns(t *testing.T) {
 	testhelpers.AssertSymlink(t, notesLive, filepath.Join(storageDir, "notes.md"))
 }
 
+func TestProjectRestore_Idempotent(t *testing.T) {
+	svc, home := testhelpers.TestHome(t)
+	repoDir := filepath.Join(home, "repos", "hermes")
+	testhelpers.MakeDir(t, repoDir)
+	initProjectRepo(t, repoDir)
+
+	ps := service.NewProjectService(svc)
+	if _, _, err := ps.ProjectAddPattern(context.Background(), repoDir, ".cursor/**"); err != nil {
+		t.Fatalf("add pattern: %v", err)
+	}
+
+	liveFile := filepath.Join(repoDir, ".cursor", "rules.md")
+	testhelpers.MakeFile(t, liveFile, "# rules\n")
+
+	result, err := ps.ProjectPush(context.Background(), repoDir, false)
+	if err != nil {
+		t.Fatalf("ProjectPush: %v", err)
+	}
+
+	storageFile := filepath.Join(svc.RepoPath(), "projects", result.ProjectID, ".cursor", "rules.md")
+	testhelpers.AssertSymlink(t, liveFile, storageFile)
+
+	info, err := ps.ProjectRestore(context.Background(), repoDir, false, false)
+	if err != nil {
+		t.Fatalf("ProjectRestore: %v", err)
+	}
+	if len(info.Restored) != 0 {
+		t.Errorf("Restored = %v, want [] for already-correct symlink", info.Restored)
+	}
+	if len(info.BackedUp) != 0 {
+		t.Errorf("BackedUp = %v, want []", info.BackedUp)
+	}
+
+	testhelpers.AssertSymlink(t, liveFile, storageFile)
+}
+
+func TestProjectRestoreHook_CreatesMissingAndReportsCollisions(t *testing.T) {
+	svc, home := testhelpers.TestHome(t)
+	repoDir := filepath.Join(home, "repos", "hermes")
+	testhelpers.MakeDir(t, repoDir)
+	initProjectRepo(t, repoDir)
+
+	ps := service.NewProjectService(svc)
+	if _, _, err := ps.ProjectAddPattern(context.Background(), repoDir, ".cursor/**"); err != nil {
+		t.Fatalf("add pattern: %v", err)
+	}
+	if _, _, err := ps.ProjectAddPattern(context.Background(), repoDir, ".todo/**"); err != nil {
+		t.Fatalf("add pattern: %v", err)
+	}
+
+	rulesLive := filepath.Join(repoDir, ".cursor", "rules.md")
+	todoLive := filepath.Join(repoDir, ".todo", "a.md")
+	testhelpers.MakeFile(t, rulesLive, "# rules\n")
+	testhelpers.MakeFile(t, todoLive, "- todo\n")
+
+	result, err := ps.ProjectPush(context.Background(), repoDir, false)
+	if err != nil {
+		t.Fatalf("ProjectPush: %v", err)
+	}
+
+	todoStorage := filepath.Join(svc.RepoPath(), "projects", result.ProjectID, ".todo", "a.md")
+
+	// Simulate fresh clone: remove the symlinks.
+	if err := os.Remove(rulesLive); err != nil {
+		t.Fatalf("remove rules symlink: %v", err)
+	}
+	if err := os.Remove(todoLive); err != nil {
+		t.Fatalf("remove todo symlink: %v", err)
+	}
+
+	// Put a real file at one target to create a collision.
+	testhelpers.MakeFile(t, rulesLive, "local rules\n")
+
+	info, err := ps.ProjectRestoreHook(context.Background(), repoDir)
+	if err != nil {
+		t.Fatalf("ProjectRestoreHook: %v", err)
+	}
+	if len(info.Restored) != 1 || info.Restored[0] != ".todo/a.md" {
+		t.Errorf("Restored = %v, want [.todo/a.md]", info.Restored)
+	}
+	if len(info.Collisions) != 1 || info.Collisions[0] != ".cursor/rules.md" {
+		t.Errorf("Collisions = %v, want [.cursor/rules.md]", info.Collisions)
+	}
+	if len(info.BackedUp) != 0 {
+		t.Errorf("BackedUp = %v, want []", info.BackedUp)
+	}
+
+	if _, err := os.Lstat(rulesLive + ".lnk-backup"); err == nil {
+		t.Error("expected no .lnk-backup for hook collision")
+	}
+	content, err := os.ReadFile(rulesLive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "local rules\n" {
+		t.Errorf("collision file content = %q, want unchanged", string(content))
+	}
+	testhelpers.AssertSymlink(t, todoLive, todoStorage)
+}
+
+func TestProjectRestoreHook_Idempotent(t *testing.T) {
+	svc, home := testhelpers.TestHome(t)
+	repoDir := filepath.Join(home, "repos", "hermes")
+	testhelpers.MakeDir(t, repoDir)
+	initProjectRepo(t, repoDir)
+
+	ps := service.NewProjectService(svc)
+	if _, _, err := ps.ProjectAddPattern(context.Background(), repoDir, ".cursor/**"); err != nil {
+		t.Fatalf("add pattern: %v", err)
+	}
+
+	liveFile := filepath.Join(repoDir, ".cursor", "rules.md")
+	testhelpers.MakeFile(t, liveFile, "# rules\n")
+
+	result, err := ps.ProjectPush(context.Background(), repoDir, false)
+	if err != nil {
+		t.Fatalf("ProjectPush: %v", err)
+	}
+
+	storageFile := filepath.Join(svc.RepoPath(), "projects", result.ProjectID, ".cursor", "rules.md")
+	testhelpers.AssertSymlink(t, liveFile, storageFile)
+
+	info, err := ps.ProjectRestoreHook(context.Background(), repoDir)
+	if err != nil {
+		t.Fatalf("ProjectRestoreHook: %v", err)
+	}
+	if len(info.Restored) != 0 {
+		t.Errorf("Restored = %v, want [] for already-correct symlink", info.Restored)
+	}
+	if len(info.Collisions) != 0 {
+		t.Errorf("Collisions = %v, want []", info.Collisions)
+	}
+
+	testhelpers.AssertSymlink(t, liveFile, storageFile)
+}
+
 // ---------- Global patterns, discovery, and doctor ----------
 
 func TestProjectAddGlobalPattern(t *testing.T) {
