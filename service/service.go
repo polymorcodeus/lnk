@@ -76,6 +76,10 @@ type ListResult struct {
 type RestoreInfo struct {
 	Restored []string
 	BackedUp []string
+	// Collisions lists project-scope paths that could not be restored because
+	// a real file occupies the target. Used by hook mode, which reports
+	// collisions instead of backing them up.
+	Collisions []string
 	// SkippedTracked lists project-scope paths left untouched because the
 	// project's own git index tracks them (requires force to manage).
 	SkippedTracked []string
@@ -462,23 +466,14 @@ func (s *Service) hasLnkMarker() bool {
 	return err == nil
 }
 
-// IsLnkRepository checks if the repository appears to be managed by lnk
-func (s *Service) IsLnkRepository() bool {
-	if !s.git.IsGitRepository() {
-		return false
-	}
-
-	return s.hasLnkMarker()
-}
-
-// isLnkRepoRoot reports whether root is the configured lnk repository or
-// carries the .lnkrepo marker. This prevents implicit project detection from
-// treating the lnk repo itself as a project.
+// isLnkRepoRoot reports whether root is an lnk repository: either it carries
+// the .lnkrepo marker (including clones of the repo elsewhere on disk) or it
+// resolves to the configured repo path.
 func (s *Service) isLnkRepoRoot(root string) bool {
 	if _, err := os.Stat(filepath.Join(root, repoMarkerFile)); err == nil {
 		return true
 	}
-	repoPath, err := filepath.EvalSymlinks(s.repoPath)
+	repoPath, err := filepath.EvalSymlinks(s.RepoPath())
 	if err != nil {
 		return false
 	}
@@ -487,4 +482,13 @@ func (s *Service) isLnkRepoRoot(root string) bool {
 		return false
 	}
 	return repoPath == canonicalRoot
+}
+
+// IsLnkRepository checks if the repository appears to be managed by lnk
+func (s *Service) IsLnkRepository() bool {
+	if !s.git.IsGitRepository() {
+		return false
+	}
+
+	return s.hasLnkMarker()
 }

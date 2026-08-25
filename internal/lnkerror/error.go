@@ -27,6 +27,7 @@ var (
 	ErrOutsideProject             = errors.New("path is outside the project")
 	ErrEmptyPattern               = errors.New("pattern is empty")
 	ErrSyncFailed                 = errors.New("some files failed to sync")
+	ErrForeignHook                = errors.New("existing hook not managed by lnk")
 )
 
 // Error wraps a sentinel error with optional context for display.
