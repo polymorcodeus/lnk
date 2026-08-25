@@ -161,7 +161,7 @@ lnk doctor --fix --prune-empty            # also remove empty host scopes and pr
 lnk doctor --all                          # check all scopes
 ```
 
-`lnk doctor` checks project scope as well as host/common scope: it reports orphaned project storage, broken project symlinks, and `.lnkinclude` patterns that match no files. Project issues are listed with severity and a suggested fix.
+`lnk doctor` checks project scope as well as host/common scope: it reports orphaned project storage, broken project symlinks, and missing project checkouts using the machine-local `.lnkprojectcache`. Project issues are listed with severity and a suggested fix.
 
 When restoring symlinks, if a real file exists at the target location (not a symlink), it will be renamed to `<path>.lnk-backup` to preserve your data before the symlink is created. Check for `.lnk-backup` files after running `restore`, `update`, or `doctor` if you expect them. The git hook path (`lnk hooks run ...`) is collision-safe and does not create `.lnk-backup` files; it reports collisions to stderr and leaves the real file in place.
 
@@ -200,7 +200,9 @@ lnk project list                          # show effective global + local patter
 lnk project list --all                    # list stored projects and file counts
 lnk project push                          # move matches to lnk storage and symlink back
 lnk project sync                          # reconcile patterns, live files, and storage
+lnk project sync --all                    # reconcile every stored project
 lnk project sync --prune-deletions        # also drop storage for files deleted locally
+lnk project cache --scan ~/code           # discover local checkouts and update .lnkprojectcache
 lnk project restore                       # recreate symlinks from storage
 lnk project restore --dry-run             # preview what would be restored
 lnk project pull                          # pull lnk repo and restore
@@ -223,6 +225,8 @@ lnk project untrack --global AGENTS.md    # remove the global pattern
 
 Matched files are stored under `projects/<normalized-origin>/<path>/` in your lnk repo (derived from the project's origin remote) and symlinked back into the project. Existing files at symlink locations are backed up to `<path>.lnk-backup` during restore, just like host/common scope restores.
 
+Project checkouts are tracked in a machine-local `.lnkprojectcache` file inside the lnk repo. The cache is updated automatically on `project push` and `project sync`, and is used by `project sync --all` and `lnk doctor` to find local projects without scanning `$HOME`. It is gitignored so absolute paths are not synced across machines.
+
 `lnk update` and `lnk restore` automatically detect project scope when they run inside a git repo that contains a `.lnkinclude` file. The project scope is restored alongside the common and host scopes, and a `(project scope: <id>)` message is printed to stderr. Use the global `--no-project` flag to skip automatic detection.
 
 ### Notes and edge cases
@@ -232,6 +236,7 @@ Matched files are stored under `projects/<normalized-origin>/<path>/` in your ln
 - **Files tracked by the project's own git are left alone.** If a match is committed upstream (a typical `AGENTS.md`), push/sync skip it with a warning to avoid replacing a committed file with a machine-local symlink; use `--force` to override.
 - **The lnk repo protects itself.** Project commands refuse to run inside the lnk repository (or any clone of it) to prevent storing it inside its own storage.
 - **Reconciliation is explicit for deletions.** `project sync` reports stored files whose live copies were deleted; they are only removed from storage with `--prune-deletions`.
+- **`.lnkprojectcache` is machine-local.** The cache is maintained automatically by `project push` and `project sync`. Use `project cache --scan <dir>` to populate or repair it on a new machine or after moving checkouts.
 
 ### Hooks
 
@@ -283,7 +288,8 @@ man man/lnk-project-push.1                # read a generated page
 | `project list` | Show effective project patterns |
 | `project untrack [--keep] <pattern>` | Remove a pattern from the project's `.lnkinclude`, restoring its files unless `--keep` |
 | `project push [--force]` | Move matching project files to lnk storage |
-| `project sync [--dry-run] [--prune-deletions] [--force]` | Reconcile patterns, live files, and storage |
+| `project sync [--all] [--dry-run] [--prune-deletions] [--force]` | Reconcile patterns, live files, and storage |
+| `project cache --scan <dir>` | Discover local checkouts and update `.lnkprojectcache` |
 | `project restore [--dry-run] [--force]` | Recreate project symlinks from storage |
 | `project pull [--force]` | Pull lnk repo and restore project symlinks |
 | `project remove` | Stop managing the project: restore all files and delete storage |
