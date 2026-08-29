@@ -152,6 +152,8 @@ lnk list --host work                      # host-specific
 lnk list --all                            # all scopes
 ```
 
+When listing all scopes, host profiles show `[active]` if at least one managed symlink exists on the current machine, or `[not installed]` otherwise. Common scope is always active.
+
 ### Health checks
 
 ```bash

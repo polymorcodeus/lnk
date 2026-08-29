@@ -871,7 +871,15 @@ func newListCmd(repoFlag *string) *cobra.Command {
 						return err
 					}
 				}
-				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s:\n", scope.Name); err != nil {
+				header := scope.Name
+				if scope.Name != "common" {
+					if scope.Active {
+						header += " [active]"
+					} else {
+						header += " [not installed]"
+					}
+				}
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s:\n", header); err != nil {
 					return err
 				}
 				if len(scope.Items) == 0 {

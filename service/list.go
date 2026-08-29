@@ -2,6 +2,9 @@ package service
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/polymorcodeus/lnk/internal/lnkerror"
 	"github.com/polymorcodeus/lnk/internal/tracker"
@@ -39,10 +42,48 @@ func (s *Service) List(ctx context.Context, host string, all bool) (ListResult, 
 		if err != nil {
 			return ListResult{}, err
 		}
+		active := scope == tracker.CommonScope
+		if !active && len(items) > 0 {
+			active = s.isHostActive(scope, items)
+		}
 		result.Scopes = append(result.Scopes, ScopeList{
-			Name:  scope,
-			Items: items,
+			Name:   scope,
+			Items:  items,
+			Active: active,
 		})
 	}
 	return result, nil
+}
+
+// isHostActive reports whether at least one symlink for the given host scope
+// exists on the current machine and points into the repo's host storage.
+func (s *Service) isHostActive(host string, items []string) bool {
+	format, err := s.getFormat()
+	if err != nil {
+		return false
+	}
+	tr := tracker.New(s.repoPath, host, format)
+	storagePath, err := tr.HostStoragePath()
+	if err != nil {
+		return false
+	}
+	for _, item := range items {
+		livePath, err := s.resolver.ToLive(item)
+		if err != nil {
+			continue
+		}
+		target, err := os.Readlink(livePath)
+		if err != nil {
+			continue
+		}
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(filepath.Dir(livePath), target)
+		}
+		target = filepath.Clean(target)
+		storagePath = filepath.Clean(storagePath)
+		if strings.HasPrefix(target, storagePath+string(filepath.Separator)) || target == storagePath {
+			return true
+		}
+	}
+	return false
 }

@@ -2,7 +2,10 @@ package service_test
 
 import (
 	"context"
+	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/polymorcodeus/lnk/internal/testhelpers"
@@ -236,6 +239,186 @@ func TestList_UninitializedRepo(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for uninitialized repo, got nil")
 	}
+}
+
+func TestList_ActiveHost(t *testing.T) {
+	svc, home := testhelpers.TestHome(t)
+	repoPath := svc.RepoPath()
+
+	setupTrackedFile(t, repoPath, home, "personal", ".bashrc", "# bashrc")
+
+	result, err := svc.List(context.Background(), "", true)
+	if err != nil {
+		t.Fatalf("List --all: %v", err)
+	}
+
+	personal := findScope(result, "personal")
+	if personal == nil {
+		t.Fatal("expected personal scope")
+	}
+	if !personal.Active {
+		t.Error("personal scope should be active when symlink exists")
+	}
+}
+
+func TestList_InactiveHost(t *testing.T) {
+	svc, _ := testhelpers.TestHome(t)
+	repoPath := svc.RepoPath()
+
+	// Track a file without creating a symlink at the live path.
+	setupTrackedFileNoSymlink(t, repoPath, "work", ".ssh/config", "host work")
+
+	result, err := svc.List(context.Background(), "", true)
+	if err != nil {
+		t.Fatalf("List --all: %v", err)
+	}
+
+	work := findScope(result, "work")
+	if work == nil {
+		t.Fatal("expected work scope")
+	}
+	if work.Active {
+		t.Error("work scope should be inactive when no symlink exists")
+	}
+}
+
+func TestList_CommonAlwaysActive(t *testing.T) {
+	svc, _ := testhelpers.TestHome(t)
+	repoPath := svc.RepoPath()
+
+	// Track only common files, no symlinks.
+	setupTrackedFileNoSymlink(t, repoPath, "common", ".bashrc", "# bashrc")
+
+	result, err := svc.List(context.Background(), "", false)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+
+	if len(result.Scopes) != 1 {
+		t.Fatalf("expected 1 scope, got %d", len(result.Scopes))
+	}
+	if !result.Scopes[0].Active {
+		t.Error("common scope should always be active")
+	}
+}
+
+func TestList_HostScopeNotActiveWhenFlag(t *testing.T) {
+	svc, home := testhelpers.TestHome(t)
+	repoPath := svc.RepoPath()
+
+	setupTrackedFile(t, repoPath, home, "personal", ".bashrc", "# bashrc")
+
+	result, err := svc.List(context.Background(), "personal", false)
+	if err != nil {
+		t.Fatalf("List --host personal: %v", err)
+	}
+
+	if len(result.Scopes) != 1 {
+		t.Fatalf("expected 1 scope, got %d", len(result.Scopes))
+	}
+	// When listing a specific host, Active should still reflect reality.
+	if !result.Scopes[0].Active {
+		t.Error("active personal host scope should be Active=true")
+	}
+}
+
+func TestList_EmptyHostScopeNotActive(t *testing.T) {
+	svc, _ := testhelpers.TestHome(t)
+	repoPath := svc.RepoPath()
+
+	// Create .lnk.ghost file but leave it empty.
+	if err := os.WriteFile(filepath.Join(repoPath, ".lnk.ghost"), []byte{}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := svc.List(context.Background(), "", true)
+	if err != nil {
+		t.Fatalf("List --all: %v", err)
+	}
+
+	ghost := findScope(result, "ghost")
+	if ghost == nil {
+		t.Fatal("expected ghost scope")
+	}
+	if ghost.Active {
+		t.Error("empty ghost scope should not be active")
+	}
+}
+
+// setupTrackedFileNoSymlink creates repo storage and tracker entries without
+// creating a symlink at the live path. Used to simulate a host that is
+// tracked but not installed on the current machine.
+func setupTrackedFileNoSymlink(t *testing.T, repoPath, scope, relativePath, content string) {
+	t.Helper()
+
+	var storageRoot string
+	if scope == "" || scope == "common" {
+		marker, _ := os.ReadFile(filepath.Join(repoPath, ".lnkrepo"))
+		if strings.Contains(string(marker), "version=1") {
+			storageRoot = repoPath
+		} else if len(marker) == 0 {
+			if _, err := os.Stat(filepath.Join(repoPath, ".lnk")); err == nil {
+				storageRoot = repoPath
+			} else {
+				storageRoot = filepath.Join(repoPath, "common.lnk")
+			}
+		} else {
+			storageRoot = filepath.Join(repoPath, "common.lnk")
+		}
+	} else {
+		storageRoot = filepath.Join(repoPath, scope+".lnk")
+	}
+
+	storagePath := filepath.Join(storageRoot, relativePath)
+	if err := os.MkdirAll(filepath.Dir(storagePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(storagePath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var trackerName string
+	if scope == "" || scope == "common" {
+		if storageRoot == repoPath {
+			trackerName = ".lnk"
+		} else {
+			trackerName = ".lnk.common"
+		}
+	} else {
+		trackerName = ".lnk." + scope
+	}
+
+	trackerPath := filepath.Join(repoPath, trackerName)
+	existing, _ := os.ReadFile(trackerPath)
+	entries := strings.TrimSpace(string(existing))
+	if entries != "" {
+		entries += "\n"
+	}
+	entries += relativePath + "\n"
+	if err := os.WriteFile(trackerPath, []byte(entries), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	commitCmds := [][]string{
+		{"git", "-C", repoPath, "add", "."},
+		{"git", "-C", repoPath, "commit", "-m", "lnk: added " + relativePath},
+	}
+	for _, args := range commitCmds {
+		cmd := exec.Command(args[0], args[1:]...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git setup failed: %v\n%s", err, out)
+		}
+	}
+}
+
+// findScope returns the ScopeList with the given name, or nil.
+func findScope(result service.ListResult, name string) *service.ScopeList {
+	for i := range result.Scopes {
+		if result.Scopes[i].Name == name {
+			return &result.Scopes[i]
+		}
+	}
+	return nil
 }
 
 // scopeNames extracts scope names from a ListResult for use in failure messages.

@@ -63,8 +63,9 @@ func WithGitOptions(opts ...gitpkg.Option) Option {
 
 // ScopeList describes tracked items for one storage scope.
 type ScopeList struct {
-	Name  string
-	Items []string
+	Name   string
+	Items  []string
+	Active bool
 }
 
 // ListResult contains tracked items grouped by storage scope.
