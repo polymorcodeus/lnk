@@ -151,7 +151,7 @@ func TestNewRootCommand(t *testing.T) {
 	t.Run("all_subcommands_registered", func(t *testing.T) {
 		root := cmd.NewRootCommand()
 		want := []string{
-			"init", "clone", "add", "move", "remove", "forget",
+			"init", "clone", "add", "create", "move", "remove", "forget",
 			"list", "status", "diff", "commit", "push", "pull",
 			"restore", "update", "doctor", "format", "bootstrap",
 			"project",

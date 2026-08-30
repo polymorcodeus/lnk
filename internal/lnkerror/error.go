@@ -28,6 +28,8 @@ var (
 	ErrEmptyPattern               = errors.New("pattern is empty")
 	ErrSyncFailed                 = errors.New("some files failed to sync")
 	ErrForeignHook                = errors.New("existing hook not managed by lnk")
+	ErrPathExists                 = errors.New("path already exists")
+	ErrMixedCreateTypes           = errors.New("cannot mix files and directories in one invocation")
 )
 
 // Error wraps a sentinel error with optional context for display.

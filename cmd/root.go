@@ -42,6 +42,7 @@ func NewRootCommand() *cobra.Command {
 	rootCmd.AddCommand(newInitCmd(&repoPath))
 	rootCmd.AddCommand(newCloneCmd(&repoPath))
 	rootCmd.AddCommand(newAddCmd(&repoPath))
+	rootCmd.AddCommand(newCreateCmd(&repoPath))
 	rootCmd.AddCommand(newMoveCmd(&repoPath))
 	rootCmd.AddCommand(newRemoveCmd(&repoPath))
 	rootCmd.AddCommand(newForgetCmd(&repoPath))

@@ -17,7 +17,9 @@ Track dotfiles across machines with one command. Lnk moves files into a Git repo
 ```bash
 lnk init                                       # create a local repo
 lnk clone git@github.com:you/dotfiles.git      # clone a remote repo
-lnk add ~/.vimrc ~/.bashrc ~/.gitconfig        # track files
+lnk create ~/.vimrc ~/.bashrc ~/.gitconfig     # create empty files and track them
+lnk create --dir ~/.config/awesome             # create empty directory and track it
+lnk add ~/.vimrc ~/.bashrc ~/.gitconfig        # track existing files
 lnk add --host work ~/.ssh/config              # per-machine config
 lnk push                                       # push to remote
 lnk update                                     # pull and restore symlinks
@@ -101,6 +103,17 @@ Common files live at the repo root (v1) or under `common.lnk/` (v2). Host-specif
 ```
 
 ## Features
+
+### Create files and directories
+
+```bash
+lnk create ~/.vimrc ~/.bashrc             # create empty files and track them
+lnk create --dir ~/.config/awesome        # create empty directory and track it
+lnk create ~/.config/awesome/             # same as --dir (trailing slash)
+lnk create --host work ~/.ssh/config      # create and track in host scope
+```
+
+All paths in one `create` invocation must be the same kind: either all files or all directories. Use `--dir` or a trailing slash to request directories.
 
 ### Add files
 
@@ -271,6 +284,7 @@ man man/lnk-project-push.1                # read a generated page
 | `init` | Create or adopt a local lnk repo |
 | `clone <url> [--bootstrap]` | Clone a remote lnk repo |
 | `add [--host H] <path...>` | Track files (move to repo + symlink) |
+| `create [--dir] [--host H] <path...>` | Create empty files or directories and track them |
 | `move <path> (--to-common \| --to-host H)` | Move a tracked path between scopes |
 | `remove [--host H] <path>` | Stop managing, restore file locally |
 | `forget [--host H] <path>` | Stop tracking, keep stored repo copy |
