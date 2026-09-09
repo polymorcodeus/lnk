@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/polymorcodeus/lnk/cmd"
-	"github.com/polymorcodeus/lnk/internal/lnkerror"
-	"github.com/polymorcodeus/lnk/internal/testhelpers"
+	"github.com/polymorcodeus/lnk/v2/cmd"
+	"github.com/polymorcodeus/lnk/v2/internal/lnkerror"
+	"github.com/polymorcodeus/lnk/v2/internal/testhelpers"
 )
 
 func TestCreateCmd_MixedFileAndDir(t *testing.T) {

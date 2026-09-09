@@ -7,7 +7,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/polymorcodeus/lnk/internal/tracker"
+	"github.com/polymorcodeus/lnk/v2/internal/tracker"
 )
 
 func TestTracker_LnkFileName(t *testing.T) {

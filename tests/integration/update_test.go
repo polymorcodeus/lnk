@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/polymorcodeus/lnk/internal/testhelpers"
-	"github.com/polymorcodeus/lnk/service"
+	"github.com/polymorcodeus/lnk/v2/internal/testhelpers"
+	"github.com/polymorcodeus/lnk/v2/service"
 )
 
 // TestIntegration_Update simulates the core lnk update workflow: a second

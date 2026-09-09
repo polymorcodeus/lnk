@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/polymorcodeus/lnk/internal/testhelpers"
+	"github.com/polymorcodeus/lnk/v2/internal/testhelpers"
 )
 
 // TestIntegration_FullDotfileSetup simulates a user setting up lnk for the

@@ -11,12 +11,12 @@ import (
 	"slices"
 	"strings"
 
-	filemgr "github.com/polymorcodeus/lnk/internal/filemanager"
-	fspkg "github.com/polymorcodeus/lnk/internal/fs"
-	gitpkg "github.com/polymorcodeus/lnk/internal/git"
-	"github.com/polymorcodeus/lnk/internal/lnkerror"
-	"github.com/polymorcodeus/lnk/internal/scope"
-	"github.com/polymorcodeus/lnk/internal/tracker"
+	filemgr "github.com/polymorcodeus/lnk/v2/internal/filemanager"
+	fspkg "github.com/polymorcodeus/lnk/v2/internal/fs"
+	gitpkg "github.com/polymorcodeus/lnk/v2/internal/git"
+	"github.com/polymorcodeus/lnk/v2/internal/lnkerror"
+	"github.com/polymorcodeus/lnk/v2/internal/scope"
+	"github.com/polymorcodeus/lnk/v2/internal/tracker"
 )
 
 const (

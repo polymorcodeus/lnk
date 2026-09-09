@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/polymorcodeus/lnk/internal/bootstrapper"
-	"github.com/polymorcodeus/lnk/internal/lnkerror"
+	"github.com/polymorcodeus/lnk/v2/internal/bootstrapper"
+	"github.com/polymorcodeus/lnk/v2/internal/lnkerror"
 )
 
 // --- stubs ---

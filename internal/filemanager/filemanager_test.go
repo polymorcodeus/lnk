@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/polymorcodeus/lnk/internal/filemanager"
+	"github.com/polymorcodeus/lnk/v2/internal/filemanager"
 )
 
 // ---------- fakes ----------

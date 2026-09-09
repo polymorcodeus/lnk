@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/polymorcodeus/lnk/internal/tracker"
-	"github.com/polymorcodeus/lnk/service"
+	"github.com/polymorcodeus/lnk/v2/internal/tracker"
+	"github.com/polymorcodeus/lnk/v2/service"
 )
 
 // ---------- Repo setup helpers ----------

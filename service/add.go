@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/polymorcodeus/lnk/internal/filemanager"
-	"github.com/polymorcodeus/lnk/internal/gitboundary"
-	"github.com/polymorcodeus/lnk/internal/lnkerror"
+	"github.com/polymorcodeus/lnk/v2/internal/filemanager"
+	"github.com/polymorcodeus/lnk/v2/internal/gitboundary"
+	"github.com/polymorcodeus/lnk/v2/internal/lnkerror"
 )
 
 // Add tracks one or more paths in common or one host scope.

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/polymorcodeus/lnk/internal/git"
-	"github.com/polymorcodeus/lnk/internal/testhelpers"
+	"github.com/polymorcodeus/lnk/v2/internal/git"
+	"github.com/polymorcodeus/lnk/v2/internal/testhelpers"
 )
 
 // ---------- helpers ----------

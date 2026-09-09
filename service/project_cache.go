@@ -10,8 +10,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/polymorcodeus/lnk/internal/lnkerror"
-	"github.com/polymorcodeus/lnk/internal/resolver"
+	"github.com/polymorcodeus/lnk/v2/internal/lnkerror"
+	"github.com/polymorcodeus/lnk/v2/internal/resolver"
 )
 
 // projectCacheFile is the machine-local mapping from stored project IDs to

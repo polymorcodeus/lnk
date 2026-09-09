@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"slices"
 
-	"github.com/polymorcodeus/lnk/internal/filemanager"
-	"github.com/polymorcodeus/lnk/internal/lnkerror"
-	"github.com/polymorcodeus/lnk/internal/tracker"
+	"github.com/polymorcodeus/lnk/v2/internal/filemanager"
+	"github.com/polymorcodeus/lnk/v2/internal/lnkerror"
+	"github.com/polymorcodeus/lnk/v2/internal/tracker"
 )
 
 // Remove stops managing a path and restores it to the current machine.
