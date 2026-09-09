@@ -6,9 +6,9 @@ import (
 	"os"
 	"path/filepath"
 
-	fspkg "github.com/polymorcodeus/lnk/internal/fs"
-	"github.com/polymorcodeus/lnk/internal/lnkerror"
-	"github.com/polymorcodeus/lnk/internal/tracker"
+	fspkg "github.com/polymorcodeus/lnk/v2/internal/fs"
+	"github.com/polymorcodeus/lnk/v2/internal/lnkerror"
+	"github.com/polymorcodeus/lnk/v2/internal/tracker"
 )
 
 // Move transfers ownership of a tracked path between scopes.

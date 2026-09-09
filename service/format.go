@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"strings"
 
-	fspkg "github.com/polymorcodeus/lnk/internal/fs"
-	"github.com/polymorcodeus/lnk/internal/lnkerror"
-	"github.com/polymorcodeus/lnk/internal/tracker"
+	fspkg "github.com/polymorcodeus/lnk/v2/internal/fs"
+	"github.com/polymorcodeus/lnk/v2/internal/lnkerror"
+	"github.com/polymorcodeus/lnk/v2/internal/tracker"
 )
 
 // commonPath describes both legacy and v2 paths for commonScope

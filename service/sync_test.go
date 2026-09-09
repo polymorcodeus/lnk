@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/polymorcodeus/lnk/internal/lnkerror"
-	"github.com/polymorcodeus/lnk/internal/testhelpers"
-	"github.com/polymorcodeus/lnk/service"
+	"github.com/polymorcodeus/lnk/v2/internal/lnkerror"
+	"github.com/polymorcodeus/lnk/v2/internal/testhelpers"
+	"github.com/polymorcodeus/lnk/v2/service"
 )
 
 // pushAndClone sets up a bare remote, pushes an initial lnk commit, then

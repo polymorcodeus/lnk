@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/polymorcodeus/lnk/internal/hooks"
-	"github.com/polymorcodeus/lnk/internal/lnkerror"
+	"github.com/polymorcodeus/lnk/v2/internal/hooks"
+	"github.com/polymorcodeus/lnk/v2/internal/lnkerror"
 )
 
 func TestInstallLnkRepo_WritesPostMergeHook(t *testing.T) {

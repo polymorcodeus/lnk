@@ -6,8 +6,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/polymorcodeus/lnk/internal/lnkerror"
-	"github.com/polymorcodeus/lnk/service"
+	"github.com/polymorcodeus/lnk/v2/internal/lnkerror"
+	"github.com/polymorcodeus/lnk/v2/service"
 )
 
 // newCreateCmd returns the "create" subcommand.

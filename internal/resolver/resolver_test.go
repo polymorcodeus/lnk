@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/polymorcodeus/lnk/internal/resolver"
+	"github.com/polymorcodeus/lnk/v2/internal/resolver"
 )
 
 func TestNormalizeRemoteURL(t *testing.T) {

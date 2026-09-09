@@ -6,8 +6,8 @@ import (
 	"io"
 	"os"
 
-	bootpkg "github.com/polymorcodeus/lnk/internal/bootstrapper"
-	"github.com/polymorcodeus/lnk/internal/lnkerror"
+	bootpkg "github.com/polymorcodeus/lnk/v2/internal/bootstrapper"
+	"github.com/polymorcodeus/lnk/v2/internal/lnkerror"
 )
 
 // Init creates a new local repo when needed.

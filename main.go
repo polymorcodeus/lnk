@@ -5,7 +5,7 @@ import (
 	_ "embed"
 	"strings"
 
-	"github.com/polymorcodeus/lnk/cmd"
+	"github.com/polymorcodeus/lnk/v2/cmd"
 )
 
 //go:embed VERSION

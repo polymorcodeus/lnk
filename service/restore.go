@@ -7,8 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
-	fspkg "github.com/polymorcodeus/lnk/internal/fs"
-	"github.com/polymorcodeus/lnk/internal/lnkerror"
+	fspkg "github.com/polymorcodeus/lnk/v2/internal/fs"
+	"github.com/polymorcodeus/lnk/v2/internal/lnkerror"
 )
 
 // Restore applies the effective machine profile: common only, or common + host.

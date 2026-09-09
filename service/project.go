@@ -10,13 +10,13 @@ import (
 	"slices"
 	"strings"
 
-	fspkg "github.com/polymorcodeus/lnk/internal/fs"
-	gitpkg "github.com/polymorcodeus/lnk/internal/git"
-	"github.com/polymorcodeus/lnk/internal/gitboundary"
-	"github.com/polymorcodeus/lnk/internal/lnkerror"
-	"github.com/polymorcodeus/lnk/internal/patterns"
-	"github.com/polymorcodeus/lnk/internal/resolver"
-	"github.com/polymorcodeus/lnk/internal/scope"
+	fspkg "github.com/polymorcodeus/lnk/v2/internal/fs"
+	gitpkg "github.com/polymorcodeus/lnk/v2/internal/git"
+	"github.com/polymorcodeus/lnk/v2/internal/gitboundary"
+	"github.com/polymorcodeus/lnk/v2/internal/lnkerror"
+	"github.com/polymorcodeus/lnk/v2/internal/patterns"
+	"github.com/polymorcodeus/lnk/v2/internal/resolver"
+	"github.com/polymorcodeus/lnk/v2/internal/scope"
 )
 
 // ProjectService implements project-scope operations for the lnk repo

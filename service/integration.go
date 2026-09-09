@@ -7,9 +7,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/polymorcodeus/lnk/internal/gitboundary"
-	"github.com/polymorcodeus/lnk/internal/resolver"
-	"github.com/polymorcodeus/lnk/internal/scope"
+	"github.com/polymorcodeus/lnk/v2/internal/gitboundary"
+	"github.com/polymorcodeus/lnk/v2/internal/resolver"
+	"github.com/polymorcodeus/lnk/v2/internal/scope"
 )
 
 // DetectProjectScope checks if dir (or the current working directory when dir
